@@ -1,4 +1,4 @@
-FROM quay.io/fedora/fedora-bootc:42
+FROM quay.io/fedora/fedora-bootc:43
 
 # System packages — GPU stack, firmware, container runtime, brew deps
 RUN --mount=type=cache,target=/var/cache/libdnf5 \

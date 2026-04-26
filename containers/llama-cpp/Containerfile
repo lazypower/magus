@@ -1,6 +1,6 @@
 ## Build llama.cpp with Vulkan + cooperative matrix (RDNA 3.5 WMMA)
 
-FROM quay.io/fedora/fedora-bootc:42 AS builder
+FROM quay.io/fedora/fedora-bootc:43 AS builder
 
 RUN --mount=type=cache,target=/var/cache/libdnf5 \
     dnf install -y \
@@ -22,7 +22,7 @@ RUN cmake -B build \
 
 
 ## Runtime image
-FROM registry.fedoraproject.org/fedora-minimal:42
+FROM registry.fedoraproject.org/fedora-minimal:43
 
 RUN microdnf install -y \
         mesa-vulkan-drivers \

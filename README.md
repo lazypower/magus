@@ -109,7 +109,7 @@ just vllm                      # rebuild if needed
 ```
 +----------------------------------------------------------+
 |  Substrate (bootc image) — slow-moving, rarely rebuilt    |
-|  Fedora 42 · amdgpu · ROCm libs · Vulkan (RADV) · fw    |
+|  Fedora 43 · amdgpu · ROCm libs · Vulkan (RADV) · fw    |
 +----------------------------------------------------------+
 |  Compute layer — fast-moving, iterate freely              |
 |                                                           |
