@@ -6,6 +6,8 @@ RUN --mount=type=cache,target=/var/cache/libdnf5 \
     dnf install -y \
         gcc gcc-c++ cmake make git \
         vulkan-headers vulkan-loader-devel \
+        glslang glslang-devel \
+        spirv-headers-devel spirv-tools spirv-tools-devel \
         glslc \
     && dnf clean all
 

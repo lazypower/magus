@@ -15,7 +15,7 @@ RUN --mount=type=cache,target=/var/cache/libdnf5 \
         golang cmake gcc-c++ git curl \
         vulkan-headers vulkan-loader-devel \
         glslang glslang-devel \
-        spirv-tools spirv-tools-devel \
+        spirv-headers-devel spirv-tools spirv-tools-devel \
         glslc \
     && dnf clean all
 
