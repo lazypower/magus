@@ -2,6 +2,9 @@
 
 FROM quay.io/fedora/fedora-bootc:43 AS builder
 
+# Coopmat requires a GPU at build time — OFF for headless CI, ON for local builds
+ARG COOPMAT=OFF
+
 RUN --mount=type=cache,target=/var/cache/libdnf5 \
     dnf install -y \
         gcc gcc-c++ cmake make git \
@@ -18,7 +21,7 @@ WORKDIR /build/llama.cpp
 RUN cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
         -DGGML_VULKAN=ON \
-        -DGGML_VULKAN_COOPMAT_GLSLC_SUPPORT=ON \
+        -DGGML_VULKAN_COOPMAT_GLSLC_SUPPORT=${COOPMAT} \
     && cmake --build build --config Release -j$(nproc) \
     && cmake --install build --prefix /out
 

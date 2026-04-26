@@ -28,9 +28,10 @@ ollama:
         -f containers/ollama/Containerfile \
         containers/ollama
 
-# Build the llama.cpp container (Vulkan + coopmat)
-llama-cpp:
+# Build the llama.cpp container (Vulkan). Use COOPMAT=ON on GPU-equipped hosts.
+llama-cpp coopmat="OFF":
     podman build \
+        --build-arg COOPMAT={{ coopmat }} \
         --tag {{ image_name }}-llama-cpp:{{ image_tag }} \
         --tag {{ llama_ref }} \
         -f containers/llama-cpp/Containerfile \
