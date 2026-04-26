@@ -4,7 +4,7 @@
 # KHR_cooperative_matrix detection. We patch them from upstream llama.cpp
 # so coopmat fires on RDNA 3.5 (gfx1151).
 #
-# Adapted from CobaltRush: gitea.wabash.place/chuck/CobaltRush
+# Adapted from CobaltRush: github.com/lazypower/CobaltRush
 
 FROM quay.io/fedora/fedora-bootc:42 AS builder
 

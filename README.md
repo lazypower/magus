@@ -1,3 +1,5 @@
+![](media/magus_header.png)
+
 # Magus
 
 A bootc OS image for the Framework Desktop with AMD Strix Halo. Purpose-built for LLM inference and containers — nothing else.
@@ -58,7 +60,7 @@ Two acceleration paths, both in the image:
 
 ### Ollama
 
-Custom-built container with Vulkan backend and coopmat shader patch (same pattern as [CobaltRush](https://gitea.wabash.place/chuck/CobaltRush)). Ollama's vendored ggml is missing the coopmat feature-test shaders — we patch them from upstream llama.cpp so KHR_cooperative_matrix detection fires on RDNA 3.5. Starts at boot via quadlet:
+Custom-built container with Vulkan backend and coopmat shader patch (same pattern as [CobaltRush](https://github.com/lazypower/CobaltRush)). Ollama's vendored ggml is missing the coopmat feature-test shaders — we patch them from upstream llama.cpp so KHR_cooperative_matrix detection fires on RDNA 3.5. Starts at boot via quadlet:
 
 ```bash
 ollama run llama3.3:70b        # pull and run
@@ -68,8 +70,8 @@ ollama list                    # see what's loaded
 Build the container separately from the OS image:
 
 ```bash
-make ollama                    # build
-make push-ollama               # push to registry
+just ollama                    # build
+just push-ollama               # push to registry
 ```
 
 ### llama.cpp
@@ -99,7 +101,7 @@ A science experiment. Thin wrapper over `rocm/vllm:latest` with Strix Halo envir
 
 ```bash
 systemctl --user start vllm
-make vllm                      # rebuild if needed
+just vllm                      # rebuild if needed
 ```
 
 ## Architecture
@@ -130,22 +132,22 @@ make vllm                      # rebuild if needed
 Requires podman on any Linux host:
 
 ```bash
-make build
+just build
 ```
 
 This builds the OCI image locally. To push to a registry:
 
 ```bash
-make push
+just push
 ```
 
 To generate the Ignition config from Butane:
 
 ```bash
-make ignition
+just ignition
 ```
 
-### Makefile Targets
+### Recipes
 
 | Target | Description |
 |--------|-------------|
@@ -242,4 +244,4 @@ Override anything in the image layer by placing a file in the `/etc/` equivalent
 - **gfx1151 is not officially supported by ROCm.** The `HSA_OVERRIDE_GFX_VERSION=11.5.1` workaround is baked in. If a ROCm workload misbehaves, try `11.5.0` by creating `/etc/environment.d/99-rocm-override.conf` — no rebuild needed.
 - **Unified memory is the killer feature.** The iGPU shares the full 128 GB RAM pool via GTT. No VRAM wall, no PCIe bottleneck. The memory bandwidth tradeoff vs discrete is real, but for inference batch sizes of 1 it doesn't matter much.
 - **vLLM on Strix Halo is a science experiment.** vLLM's ROCm backend targets MI-series datacenter GPUs. RDNA 3.5 is uncharted territory. The quadlet is there to make it easy to test — manage expectations accordingly.
-- **Ollama is a custom container build**, not the upstream image. Built with the Vulkan backend and coopmat shader patch so KHR_cooperative_matrix fires on RDNA 3.5 (~50% throughput improvement). Lives in `containers/ollama/`, pattern adapted from [CobaltRush](https://gitea.wabash.place/chuck/CobaltRush). Update independently from the OS with `make ollama push-ollama`.
+- **Ollama is a custom container build**, not the upstream image. Built with the Vulkan backend and coopmat shader patch so KHR_cooperative_matrix fires on RDNA 3.5 (~50% throughput improvement). Lives in `containers/ollama/`, pattern adapted from [CobaltRush](https://github.com/lazypower/CobaltRush). Update independently from the OS with `just ollama push-ollama`.
