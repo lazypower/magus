@@ -1,0 +1,15 @@
+## vLLM on ROCm — science experiment for Strix Halo
+#
+# This wraps the upstream ROCm image with Strix Halo environment overrides.
+# vLLM's ROCm backend targets MI-series datacenter GPUs.
+# RDNA 3.5 is uncharted territory. Manage expectations.
+
+FROM docker.io/rocm/vllm:latest
+
+ENV HSA_OVERRIDE_GFX_VERSION=11.5.1
+ENV HF_HOME=/data/huggingface
+
+EXPOSE 8000
+
+ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+CMD ["--host", "0.0.0.0", "--port", "8000"]

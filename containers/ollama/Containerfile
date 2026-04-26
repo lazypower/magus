@@ -1,0 +1,76 @@
+## Build Ollama with Vulkan backend + coopmat shader patch
+#
+# Ollama's vendored ggml is missing the feature-test shaders that enable
+# KHR_cooperative_matrix detection. We patch them from upstream llama.cpp
+# so coopmat fires on RDNA 3.5 (gfx1151).
+#
+# Adapted from CobaltRush: gitea.wabash.place/chuck/CobaltRush
+
+FROM quay.io/fedora/fedora-bootc:42 AS builder
+
+ARG OLLAMA_VERSION=v0.17.7
+
+RUN --mount=type=cache,target=/var/cache/libdnf5 \
+    dnf install -y \
+        golang cmake gcc-c++ git curl \
+        vulkan-headers vulkan-loader-devel \
+        glslang glslang-devel \
+        spirv-tools spirv-tools-devel \
+        glslc \
+    && dnf clean all
+
+RUN git clone --depth 1 --branch ${OLLAMA_VERSION} \
+      https://github.com/ollama/ollama.git /build/ollama
+
+WORKDIR /build/ollama
+
+# Patch in upstream coopmat feature-test shaders
+ARG GGML_COMMIT=master
+RUN mkdir -p ml/backend/ggml/ggml/src/ggml-vulkan/vulkan-shaders/feature-tests && \
+    for f in coopmat.comp coopmat2.comp integer_dot.comp bfloat16.comp; do \
+      curl -sfL "https://raw.githubusercontent.com/ggml-org/llama.cpp/${GGML_COMMIT}/ggml/src/ggml-vulkan/vulkan-shaders/feature-tests/${f}" \
+        -o "ml/backend/ggml/ggml/src/ggml-vulkan/vulkan-shaders/feature-tests/${f}"; \
+    done
+
+ENV CGO_ENABLED=1
+ENV GOFLAGS="-buildvcs=false"
+ENV GOPATH=/tmp/go
+ENV GOCACHE=/tmp/go-cache
+
+# Kill ccache — it races on the cache dir in rootless builders
+RUN rm -rf /usr/lib64/ccache /usr/bin/ccache
+
+RUN cmake --preset CPU && \
+    cmake --build --parallel --preset CPU && \
+    cmake --install build --component CPU --strip
+
+RUN cmake --preset Vulkan && \
+    cmake --build --parallel --preset Vulkan && \
+    cmake --install build --component Vulkan --strip
+
+RUN go build -trimpath -o dist/bin/ollama .
+
+# Flatten into /out
+RUN mkdir -p /out/bin && \
+    cp dist/bin/ollama /out/bin/ && \
+    cp -a dist/lib /out/
+
+
+## Runtime image — minimal, just the binary + Vulkan libs
+FROM registry.fedoraproject.org/fedora-minimal:42
+
+RUN microdnf install -y \
+        mesa-vulkan-drivers \
+        vulkan-loader \
+    && microdnf clean all
+
+COPY --from=builder /out/bin/ollama /usr/bin/ollama
+COPY --from=builder /out/lib/ollama/ /usr/lib/ollama/
+
+EXPOSE 11434
+
+ENV OLLAMA_HOST=0.0.0.0:11434
+ENV HSA_OVERRIDE_GFX_VERSION=11.5.1
+
+ENTRYPOINT ["/usr/bin/ollama"]
+CMD ["serve"]

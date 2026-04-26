@@ -1,0 +1,5 @@
+# /dev/kfd accessible to render group (ROCm compute)
+KERNEL=="kfd", GROUP="render", MODE="0660"
+
+# DRI render nodes accessible to render group (Vulkan + ROCm)
+SUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="0660"

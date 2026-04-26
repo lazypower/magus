@@ -1,0 +1,10 @@
+# CLI essentials
+brew "neovim"
+brew "ripgrep"
+brew "fd"
+brew "fzf"
+brew "bat"
+brew "eza"
+brew "jq"
+brew "yq"
+brew "starship"

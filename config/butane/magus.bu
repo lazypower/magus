@@ -1,0 +1,62 @@
+variant: fcos
+version: "1.6.0"
+
+passwd:
+  users:
+    - name: chuck
+      groups:
+        - wheel
+        - video
+        - render
+      ssh_authorized_keys:
+        - "REPLACE_WITH_SSH_PUBLIC_KEY"
+      shell: /usr/bin/zsh
+
+storage:
+  disks:
+    - device: /dev/disk/by-id/REPLACE_WITH_DISK_ID
+      wipe_table: false
+      partitions:
+        - label: data
+          number: 1
+
+  filesystems:
+    - device: /dev/disk/by-partlabel/data
+      format: xfs
+      path: /var/data
+      label: data
+      with_mount_unit: true
+      mount_options:
+        - defaults
+        - noatime
+
+  directories:
+    - path: /var/data/ollama
+      mode: 0755
+    - path: /var/data/models
+      mode: 0755
+    - path: /var/data/huggingface
+      mode: 0755
+
+  files:
+    - path: /var/home/chuck/.local/bin/bootstrap-brew.sh
+      mode: 0755
+      contents:
+        inline: |
+          #!/bin/bash
+          set -euo pipefail
+          if command -v brew &>/dev/null; then
+            echo "Linuxbrew already installed."
+            exit 0
+          fi
+          echo "Installing Linuxbrew..."
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          if [ -f /var/home/chuck/Brewfile ]; then
+            echo "Installing packages from Brewfile..."
+            brew bundle --file=/var/home/chuck/Brewfile
+          fi
+      user:
+        name: chuck
+      group:
+        name: chuck

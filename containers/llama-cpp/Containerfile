@@ -1,0 +1,39 @@
+## Build llama.cpp with Vulkan + cooperative matrix (RDNA 3.5 WMMA)
+
+FROM quay.io/fedora/fedora-bootc:42 AS builder
+
+RUN --mount=type=cache,target=/var/cache/libdnf5 \
+    dnf install -y \
+        gcc gcc-c++ cmake make git \
+        vulkan-headers vulkan-loader-devel \
+        glslc \
+    && dnf clean all
+
+RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp /build/llama.cpp
+
+WORKDIR /build/llama.cpp
+
+RUN cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_VULKAN=ON \
+        -DGGML_VULKAN_COOPMAT_GLSLC_SUPPORT=ON \
+    && cmake --build build --config Release -j$(nproc) \
+    && cmake --install build --prefix /out
+
+
+## Runtime image
+FROM registry.fedoraproject.org/fedora-minimal:42
+
+RUN microdnf install -y \
+        mesa-vulkan-drivers \
+        vulkan-loader \
+    && microdnf clean all
+
+COPY --from=builder /out/ /usr/local/
+
+ENV HSA_OVERRIDE_GFX_VERSION=11.5.1
+
+EXPOSE 8080
+
+ENTRYPOINT ["llama-server"]
+CMD ["--host", "0.0.0.0", "--port", "8080"]

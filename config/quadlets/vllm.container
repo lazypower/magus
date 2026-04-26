@@ -1,0 +1,34 @@
+[Unit]
+Description=vLLM OpenAI-compatible API Server (ROCm)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/lazypower/magus-vllm:latest
+ContainerName=vllm
+
+# GPU device passthrough
+AddDevice=/dev/kfd:/dev/kfd
+AddDevice=/dev/dri:/dev/dri
+
+# Group access for GPU devices
+GroupAdd=video
+GroupAdd=render
+
+# Model/cache storage on secondary NVMe
+Volume=/var/data/huggingface:/data/huggingface:Z
+Volume=/var/data/models:/data/models:ro,Z
+
+# OpenAI-compatible API port
+PublishPort=8000:8000
+
+# Default model — override via systemd drop-in or edit this line
+Exec=--model mistralai/Mistral-7B-Instruct-v0.3 --max-model-len 8192
+
+[Service]
+Restart=always
+TimeoutStartSec=600
+
+[Install]
+# Manual start only — science experiment
+# Enable with: systemctl enable --now vllm

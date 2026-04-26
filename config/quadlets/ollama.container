@@ -1,0 +1,29 @@
+[Unit]
+Description=Ollama LLM Server (Vulkan)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/lazypower/magus-ollama:latest
+ContainerName=ollama
+
+# GPU device passthrough
+AddDevice=/dev/kfd:/dev/kfd
+AddDevice=/dev/dri:/dev/dri
+
+# Group access for GPU devices
+GroupAdd=video
+GroupAdd=render
+
+# Model storage on secondary NVMe
+Volume=/var/data/ollama:/root/.ollama:Z
+
+# API port
+PublishPort=11434:11434
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
