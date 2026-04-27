@@ -8,3 +8,15 @@ passwd:
         - wheel
       ssh_authorized_keys:
         - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGVU2Xvh5C4sxkTE5YMHgstNGgv4z9Hxe4VeHMEZdOyY"
+
+storage:
+  files:
+    - path: /etc/hostname
+      mode: 0644
+      contents:
+        inline: magus
+    - path: /etc/sudoers.d/wheel-nopasswd
+      mode: 0440
+      contents:
+        inline: |
+          %wheel ALL=(ALL) NOPASSWD: ALL

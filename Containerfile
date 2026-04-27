@@ -1,6 +1,7 @@
-FROM quay.io/fedora/fedora-bootc:43
+FROM quay.io/fedora/fedora-coreos:stable
 
-# System packages — GPU stack, firmware, container runtime, brew deps
+# System packages — GPU stack, firmware, brew deps
+# FCOS already ships: podman, skopeo, systemd, sshd, ignition, coreos-installer
 RUN --mount=type=cache,target=/var/cache/libdnf5 \
     dnf install -y \
         rocm-runtime \
@@ -14,8 +15,6 @@ RUN --mount=type=cache,target=/var/cache/libdnf5 \
         fwupd \
         power-profiles-daemon \
         ramalama \
-        podman \
-        skopeo \
         htop \
         tmux \
         git \
@@ -28,6 +27,13 @@ RUN --mount=type=cache,target=/var/cache/libdnf5 \
         procps-ng \
         file \
     && dnf clean all
+
+# Hostname
+RUN echo "magus" > /etc/hostname
+
+# Passwordless sudo for wheel group
+RUN echo '%wheel ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/wheel-nopasswd \
+    && chmod 0440 /etc/sudoers.d/wheel-nopasswd
 
 # System configuration
 COPY config/environment.d/10-rocm.conf /usr/lib/environment.d/10-rocm.conf
