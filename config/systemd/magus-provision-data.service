@@ -1,0 +1,22 @@
+[Unit]
+Description=Magus: Provision data disk
+ConditionPathExists=!/var/lib/magus/.data-provisioned
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash -c '\
+  DISK=/dev/disk/by-id/nvme-Samsung_SSD_990_PRO_4TB_S7KGNU0Y708625D; \
+  if ! blkid -s TYPE -o value "$DISK" | grep -q xfs; then \
+    mkfs.xfs -f "$DISK"; \
+  fi; \
+  mkdir -p /var/data; \
+  grep -q "$DISK" /etc/fstab || \
+    echo "$DISK /var/data xfs defaults,noatime,nofail 0 0" >> /etc/fstab; \
+  mount -a; \
+  mkdir -p /var/data/ollama /var/data/models /var/data/huggingface; \
+  mkdir -p /var/lib/magus; \
+  touch /var/lib/magus/.data-provisioned'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

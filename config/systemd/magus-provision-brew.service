@@ -1,0 +1,21 @@
+[Unit]
+Description=Magus: Bootstrap Linuxbrew
+ConditionPathExists=!/var/lib/magus/.brew-provisioned
+After=network-online.target magus-provision-user.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=chuck
+ExecStart=/usr/bin/bash -c '\
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null; \
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; \
+  if [ -f /var/home/chuck/Brewfile ]; then \
+    brew bundle --file=/var/home/chuck/Brewfile; \
+  fi; \
+  sudo mkdir -p /var/lib/magus; \
+  sudo touch /var/lib/magus/.brew-provisioned'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=Magus: Provision user groups and shell
+ConditionPathExists=!/var/lib/magus/.user-provisioned
+After=systemd-sysusers.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/usermod -aG video,render chuck
+ExecStart=/usr/bin/chsh -s /usr/bin/zsh chuck
+ExecStart=/usr/bin/mkdir -p /var/lib/magus
+ExecStart=/usr/bin/touch /var/lib/magus/.user-provisioned
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

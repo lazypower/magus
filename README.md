@@ -232,7 +232,7 @@ config/
 | `/usr/lib/udev/rules.d/` | GPU device rules | No (image) |
 | `/usr/lib/modprobe.d/` | Kernel module config | No (image) |
 | `/usr/share/containers/systemd/` | Quadlet definitions | No (image) |
-| `/etc/profile.d/` | Shell env scripts | No (image) |
+| `/etc/profile.d/` | Shell env scripts | Yes (3-way merge on upgrade) |
 | `/var/data/` | Models, HF cache | Yes (persistent) |
 | `/var/home/chuck/` | User home | Yes (persistent) |
 | `/home/linuxbrew/.linuxbrew/` | Brew prefix | Yes (persistent) |

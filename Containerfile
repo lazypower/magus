@@ -37,6 +37,12 @@ COPY config/profile.d/ollama.sh        /etc/profile.d/ollama.sh
 COPY config/udev/70-amdgpu.rules       /usr/lib/udev/rules.d/70-amdgpu.rules
 COPY config/modprobe.d/amdgpu.conf     /usr/lib/modprobe.d/amdgpu.conf
 
+# First-boot provisioning (oneshot services)
+COPY config/systemd/magus-provision-user.service /usr/lib/systemd/system/magus-provision-user.service
+COPY config/systemd/magus-provision-data.service /usr/lib/systemd/system/magus-provision-data.service
+COPY config/systemd/magus-provision-brew.service /usr/lib/systemd/system/magus-provision-brew.service
+RUN systemctl enable magus-provision-user.service magus-provision-data.service magus-provision-brew.service
+
 # Auto-update schedule — Tuesdays at 4am Central
 COPY config/systemd/bootc-fetch-apply-updates.timer.d/schedule.conf \
      /usr/lib/systemd/system/bootc-fetch-apply-updates.timer.d/schedule.conf
