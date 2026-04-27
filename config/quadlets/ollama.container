@@ -1,6 +1,6 @@
 [Unit]
 Description=Ollama LLM Server (Vulkan)
-After=network-online.target
+After=network-online.target magus-provision-data.service
 Wants=network-online.target
 
 [Container]
@@ -14,6 +14,9 @@ AddDevice=/dev/dri:/dev/dri
 # Group access for GPU devices
 GroupAdd=video
 GroupAdd=render
+
+# Enable Vulkan GPU acceleration
+Environment=OLLAMA_VULKAN=1
 
 # Model storage on secondary NVMe
 Volume=/var/data/ollama:/root/.ollama:Z

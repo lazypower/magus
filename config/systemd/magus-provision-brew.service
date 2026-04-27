@@ -1,21 +1,25 @@
 [Unit]
 Description=Magus: Bootstrap Linuxbrew
-ConditionPathExists=!/var/lib/magus/.brew-provisioned
 After=network-online.target magus-provision-user.service
 Wants=network-online.target
 
 [Service]
 Type=oneshot
 User=chuck
-ExecStart=/usr/bin/bash -c '\
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null; \
-  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; \
+ExecStart=/usr/bin/bash -c 'set -euo pipefail; \
+  echo "[magus] checking brew..." >&2; \
+  if test -x /home/linuxbrew/.linuxbrew/bin/brew; then \
+    echo "[magus] brew already converged" >&2; \
+    exit 0; \
+  fi; \
+  echo "[magus] installing linuxbrew..." >&2; \
+  /bin/bash -c "$$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null; \
+  eval "$$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; \
   if [ -f /var/home/chuck/Brewfile ]; then \
+    echo "[magus] running brew bundle..." >&2; \
     brew bundle --file=/var/home/chuck/Brewfile; \
   fi; \
-  sudo mkdir -p /var/lib/magus; \
-  sudo touch /var/lib/magus/.brew-provisioned'
-RemainAfterExit=yes
+  echo "[magus] brew provisioned" >&2'
 
 [Install]
 WantedBy=multi-user.target

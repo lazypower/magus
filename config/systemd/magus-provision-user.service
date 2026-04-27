@@ -1,15 +1,20 @@
 [Unit]
 Description=Magus: Provision user groups and shell
-ConditionPathExists=!/var/lib/magus/.user-provisioned
 After=systemd-sysusers.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/usermod -aG video,render chuck
-ExecStart=/usr/bin/chsh -s /usr/bin/zsh chuck
-ExecStart=/usr/bin/mkdir -p /var/lib/magus
-ExecStart=/usr/bin/touch /var/lib/magus/.user-provisioned
-RemainAfterExit=yes
+ExecStart=/usr/bin/bash -c 'set -euo pipefail; \
+  echo "[magus] checking user groups and shell..." >&2; \
+  if id -nG chuck | tr " " "\n" | grep -qx render && \
+     id -nG chuck | tr " " "\n" | grep -qx video && \
+     getent passwd chuck | cut -d: -f7 | grep -qx /usr/bin/zsh; then \
+    echo "[magus] user already converged" >&2; \
+    exit 0; \
+  fi; \
+  echo "[magus] provisioning user groups and shell..." >&2; \
+  usermod -aG video,render -s /usr/bin/zsh chuck; \
+  echo "[magus] user provisioned" >&2'
 
 [Install]
 WantedBy=multi-user.target
