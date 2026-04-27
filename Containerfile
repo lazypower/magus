@@ -35,6 +35,9 @@ RUN echo "magus" > /etc/hostname
 RUN echo '%wheel ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/wheel-nopasswd \
     && chmod 0440 /etc/sudoers.d/wheel-nopasswd
 
+# Default Brewfile
+COPY Brewfile /usr/share/magus/Brewfile
+
 # System configuration
 COPY config/environment.d/10-rocm.conf /usr/lib/environment.d/10-rocm.conf
 COPY config/profile.d/rocm.sh          /etc/profile.d/rocm.sh

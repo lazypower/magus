@@ -15,9 +15,11 @@ ExecStart=/usr/bin/bash -c 'set -euo pipefail; \
   echo "[magus] installing linuxbrew..." >&2; \
   /bin/bash -c "$$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null; \
   eval "$$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; \
-  if [ -f /var/home/chuck/Brewfile ]; then \
-    echo "[magus] running brew bundle..." >&2; \
-    brew bundle --file=/var/home/chuck/Brewfile; \
+  BREWFILE="/var/home/chuck/Brewfile"; \
+  [ -f "$$BREWFILE" ] || BREWFILE="/usr/share/magus/Brewfile"; \
+  if [ -f "$$BREWFILE" ]; then \
+    echo "[magus] running brew bundle from $$BREWFILE..." >&2; \
+    brew bundle --file="$$BREWFILE"; \
   fi; \
   echo "[magus] brew provisioned" >&2'
 
