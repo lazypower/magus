@@ -1,0 +1,21 @@
+version: 1
+
+file_roots:
+  - /etc/magus.d
+  - /etc/systemd/system
+  - /var/lib/magus
+  - /var/data
+
+unit_patterns:
+  - "magus-*"
+  - "*.d/10-magus.conf"
+
+deny:
+  paths:
+    - /etc/shadow
+    - /etc/passwd
+    - /etc/sudoers
+    - /etc/sudoers.d/*
+  units:
+    - "sshd.*"
+    - "systemd-*"

@@ -1,3 +1,7 @@
 ignition.json
 magus.ign
 .DS_Store
+
+# Magus reconciler binary
+/magus
+/cmd/magus/magus
