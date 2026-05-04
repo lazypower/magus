@@ -38,9 +38,14 @@ func main() {
 		os.Exit(runValidate(args))
 	case "plan":
 		os.Exit(runPlan(args))
-	case "apply", "status", "adopt", "reclaim":
-		fmt.Fprintf(os.Stderr, "magus %s: not implemented yet\n", cmd)
-		os.Exit(1)
+	case "apply":
+		os.Exit(runApply(args))
+	case "status":
+		os.Exit(runStatus(args))
+	case "adopt":
+		os.Exit(runAdopt(args))
+	case "reclaim":
+		os.Exit(runReclaim(args))
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		os.Exit(0)
