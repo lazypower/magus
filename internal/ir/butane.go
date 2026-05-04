@@ -46,8 +46,8 @@ func LoadButane(path string) (*IR, []string, error) {
 		out.Files = append(out.Files, File{
 			Path:     f.Path,
 			Mode:     f.Mode.value(0644),
-			UID:      f.User.ID.intValue(0),
-			GID:      f.Group.ID.intValue(0),
+			UID:      f.User.ID.v,
+			GID:      f.Group.ID.v,
 			Contents: contents,
 		})
 	}
@@ -56,8 +56,8 @@ func LoadButane(path string) (*IR, []string, error) {
 		out.Directories = append(out.Directories, Directory{
 			Path: d.Path,
 			Mode: d.Mode.value(0755),
-			UID:  d.User.ID.intValue(0),
-			GID:  d.Group.ID.intValue(0),
+			UID:  d.User.ID.v,
+			GID:  d.Group.ID.v,
 		})
 	}
 

@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/lazypower/magus/internal/diff"
+	"github.com/lazypower/magus/internal/hostfs"
 	"github.com/lazypower/magus/internal/ir"
 	"github.com/lazypower/magus/internal/manifest"
 	"github.com/lazypower/magus/internal/policy"
@@ -63,7 +64,7 @@ func runPlan(args []string) int {
 		return 1
 	}
 
-	plan, err := diff.Compute(parsed, m, diff.OS())
+	plan, err := diff.Compute(parsed, m, hostfs.OS())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1

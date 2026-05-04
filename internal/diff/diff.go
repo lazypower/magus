@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/lazypower/magus/internal/hostfs"
 	"github.com/lazypower/magus/internal/ir"
 	"github.com/lazypower/magus/internal/manifest"
 )
@@ -83,11 +84,11 @@ func (p *Plan) HasConflicts() bool {
 }
 
 // Compute joins the three inputs and produces a plan. fsys reads disk state;
-// in normal operation pass diff.OS().
+// in normal operation pass hostfs.OS().
 //
 // v1 only diffs files. Directories and units in the IR are counted in
 // Plan.Deferred so the CLI can disclose what's not yet handled.
-func Compute(in *ir.IR, m *manifest.Manifest, fsys Filesystem) (*Plan, error) {
+func Compute(in *ir.IR, m *manifest.Manifest, fsys hostfs.Reader) (*Plan, error) {
 	plan := &Plan{}
 	declared := map[string]bool{}
 
@@ -117,7 +118,7 @@ func Compute(in *ir.IR, m *manifest.Manifest, fsys Filesystem) (*Plan, error) {
 	return plan, nil
 }
 
-func diffFile(f ir.File, m *manifest.Manifest, fsys Filesystem) (ResourceAction, error) {
+func diffFile(f ir.File, m *manifest.Manifest, fsys hostfs.Reader) (ResourceAction, error) {
 	ra := ResourceAction{
 		Path:   f.Path,
 		Kind:   KindFile,
@@ -151,7 +152,9 @@ func diffFile(f ir.File, m *manifest.Manifest, fsys Filesystem) (ResourceAction,
 	ra.OnDiskHash = hashBytes(body)
 
 	contentMatch := ra.OnDiskHash == ra.IRHash
-	metaMatch := st.Mode == f.Mode && st.UID == f.UID && st.GID == f.GID
+	metaMatch := st.Mode == f.Mode &&
+		(f.UID == nil || st.UID == *f.UID) &&
+		(f.GID == nil || st.GID == *f.GID)
 	owned := m.Owns(f.Path)
 
 	switch {
@@ -171,7 +174,7 @@ func diffFile(f ir.File, m *manifest.Manifest, fsys Filesystem) (ResourceAction,
 	return ra, nil
 }
 
-func diffOrphan(path string, entry manifest.Resource, fsys Filesystem) (ResourceAction, error) {
+func diffOrphan(path string, entry manifest.Resource, fsys hostfs.Reader) (ResourceAction, error) {
 	ra := ResourceAction{Path: path, Kind: KindFile}
 
 	if entry.State == manifest.StateOrphaned {
@@ -197,7 +200,7 @@ func diffOrphan(path string, entry manifest.Resource, fsys Filesystem) (Resource
 
 // explainDiff produces a short reason string for update/conflict rows.
 // Keeps things grep-friendly: "content differs", "mode differs", or both.
-func explainDiff(contentMatch, metaMatch bool, st FileInfo, f ir.File) string {
+func explainDiff(contentMatch, metaMatch bool, st hostfs.FileInfo, f ir.File) string {
 	switch {
 	case !contentMatch && !metaMatch:
 		return "content and metadata differ"
@@ -205,8 +208,8 @@ func explainDiff(contentMatch, metaMatch bool, st FileInfo, f ir.File) string {
 		return "content differs"
 	case st.Mode != f.Mode:
 		return fmt.Sprintf("mode %#o → %#o", st.Mode, f.Mode)
-	case st.UID != f.UID || st.GID != f.GID:
-		return fmt.Sprintf("ownership %d:%d → %d:%d", st.UID, st.GID, f.UID, f.GID)
+	case f.UID != nil && st.UID != *f.UID, f.GID != nil && st.GID != *f.GID:
+		return fmt.Sprintf("ownership %d:%d → %s", st.UID, st.GID, ownershipDesc(f.UID, f.GID))
 	default:
 		// Should not happen — caller only invokes this when something differs.
 		return "differs"
@@ -216,4 +219,18 @@ func explainDiff(contentMatch, metaMatch bool, st FileInfo, f ir.File) string {
 func hashBytes(b []byte) string {
 	h := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(h[:])
+}
+
+// ownershipDesc renders an IR-side uid:gid where either may be unspecified
+// ("*" means "no change") for explainDiff output.
+func ownershipDesc(uid, gid *int) string {
+	u := "*"
+	if uid != nil {
+		u = fmt.Sprintf("%d", *uid)
+	}
+	g := "*"
+	if gid != nil {
+		g = fmt.Sprintf("%d", *gid)
+	}
+	return u + ":" + g
 }

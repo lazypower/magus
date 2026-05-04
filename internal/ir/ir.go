@@ -15,20 +15,27 @@ type IR struct {
 }
 
 // File is a declared regular file under storage.files.
+//
+// UID and GID are *int rather than int so the IR can distinguish "owned by
+// nobody in particular — let the writer decide" (nil) from "explicitly owned
+// by user 0" (non-nil pointer to 0). This mirrors Ignition's actual semantic
+// and lets magus run as a non-root user during development without forcing
+// every fixture to enumerate ownership.
 type File struct {
 	Path     string
 	Mode     uint32
-	UID      int
-	GID      int
+	UID      *int
+	GID      *int
 	Contents []byte
 }
 
-// Directory is a declared directory under storage.directories.
+// Directory is a declared directory under storage.directories. Same UID/GID
+// semantics as File.
 type Directory struct {
 	Path string
 	Mode uint32
-	UID  int
-	GID  int
+	UID  *int
+	GID  *int
 }
 
 // Unit is a declared systemd unit. If DropIns is non-empty, the unit is

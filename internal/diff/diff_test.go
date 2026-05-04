@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lazypower/magus/internal/hostfs"
 	"github.com/lazypower/magus/internal/ir"
 	"github.com/lazypower/magus/internal/manifest"
 )
@@ -19,12 +20,12 @@ type memFile struct {
 
 type memFS map[string]memFile
 
-func (m memFS) Stat(path string) (FileInfo, error) {
+func (m memFS) Stat(path string) (hostfs.FileInfo, error) {
 	f, ok := m[path]
 	if !ok {
-		return FileInfo{Exists: false}, nil
+		return hostfs.FileInfo{Exists: false}, nil
 	}
-	return FileInfo{Exists: true, Mode: f.mode, UID: f.uid, GID: f.gid}, nil
+	return hostfs.FileInfo{Exists: true, Mode: f.mode, UID: f.uid, GID: f.gid}, nil
 }
 
 func (m memFS) ReadFile(path string) ([]byte, error) {
@@ -66,7 +67,7 @@ func TestCreate(t *testing.T) {
 func TestSkipWhenOwnedAndUnchanged(t *testing.T) {
 	in := &ir.IR{
 		Files: []ir.File{
-			{Path: "/etc/magus.d/foo", Mode: 0o644, UID: 1000, GID: 1000, Contents: []byte("hi")},
+			{Path: "/etc/magus.d/foo", Mode: 0o644, Contents: []byte("hi")},
 		},
 	}
 	m := manifest.New()
