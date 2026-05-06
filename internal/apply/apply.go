@@ -6,15 +6,15 @@
 package apply
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/lazypower/magus/internal/diff"
 	"github.com/lazypower/magus/internal/hostfs"
 	"github.com/lazypower/magus/internal/ir"
 	"github.com/lazypower/magus/internal/manifest"
+	"github.com/lazypower/magus/internal/systemd"
 )
 
 // Status records what happened to one resource during apply.
@@ -22,7 +22,8 @@ type Status string
 
 const (
 	// StatusApplied — a change was successfully made (create, update, adopt,
-	// delete, cleanup). The summary "Applied N changes" counts these.
+	// delete, cleanup, daemon-reload, enable, restart). The summary
+	// "Applied N changes" counts these.
 	StatusApplied Status = "applied"
 	// StatusUnchanged — the resource was already in its desired state. No-op.
 	// Not surfaced in the summary; only in per-resource output.
@@ -66,9 +67,7 @@ func (r *Result) Counts() (applied, unchanged, skipped, errored int) {
 	return
 }
 
-// ExitCode picks per the spec: errors > skips > clean. Errors are exit 1,
-// skips are exit 2, fully-converged is exit 0. Numeric ordering does not
-// match severity (1 < 2 but 1 means worse) — that's intentional in the spec.
+// ExitCode picks per the spec: errors > skips > clean.
 func (r *Result) ExitCode() int {
 	var hasSkip, hasError bool
 	for _, o := range r.Outcomes {
@@ -88,30 +87,170 @@ func (r *Result) ExitCode() int {
 	return 0
 }
 
-// Apply executes plan against w. The manifest is mutated in place; the caller
-// is responsible for persisting it after Apply returns. `now` is injected so
-// applied_at timestamps are deterministic in tests.
+// pendingResource is a unified view of a path the IR declares. Files and
+// units flatten to the same shape so the file-mutation phase doesn't have to
+// branch — the only Kind-specific concern is which manifest Kind to record
+// and which hash function applies.
+type pendingResource struct {
+	Path     string
+	Mode     uint32
+	UID, GID *int
+	Contents []byte
+	Kind     manifest.Kind
+}
+
+// Apply executes plan against w and sd. The manifest is mutated in place; the
+// caller is responsible for persisting it after Apply returns. `now` is
+// injected so applied_at timestamps are deterministic in tests.
 //
-// Apply does not halt on per-resource failure — that's the reconciler-pattern
-// posture from the spec. One bad resource doesn't take the system hostage.
-func Apply(plan *diff.Plan, in *ir.IR, w hostfs.Writer, m *manifest.Manifest, now time.Time) *Result {
-	files := indexFiles(in.Files)
+// Apply runs in three phases per the spec:
+//   1. Filesystem mutations. Unit body deletes are special-cased to
+//      'systemctl disable --now' before unlink so enablement symlinks are
+//      cleaned before the file disappears.
+//   2. systemctl daemon-reload, exactly once, if any unit file was mutated.
+//   3. Per-IR-unit state reconciliation: enablement, first-time start for
+//      newly-created enabled units, and restart-if-active for content
+//      changes.
+//
+// Per-resource errors do not halt — the reconciler-pattern posture from the
+// spec. One bad resource does not take the system hostage.
+func Apply(plan *diff.Plan, in *ir.IR, w hostfs.Writer, m *manifest.Manifest, sd systemd.Manager, now time.Time) *Result {
+	resources := indexResources(in)
 	r := &Result{Outcomes: make([]Outcome, 0, len(plan.Actions))}
-	for _, a := range plan.Actions {
-		r.Outcomes = append(r.Outcomes, applyOne(a, files, w, m, now))
+
+	// Track which IR units had file mutations and what kind, so phase 3
+	// can reconcile state intelligently.
+	events := map[string]*unitEvents{}
+	getEvents := func(name string) *unitEvents {
+		if e, ok := events[name]; ok {
+			return e
+		}
+		e := &unitEvents{}
+		events[name] = e
+		return e
 	}
+
+	// Phase 1a: unit body deletes need disable-now before unlink. Drop-in
+	// deletes go through the standard path (just unlink + manifest cleanup).
+	for _, a := range plan.Actions {
+		if !isUnitBodyDelete(a) {
+			continue
+		}
+		oc := applyUnitBodyDelete(a, w, m, sd)
+		r.Outcomes = append(r.Outcomes, oc)
+		if oc.Status == StatusApplied {
+			getEvents(a.UnitName).bodyDeleted = true
+		}
+	}
+
+	// Phase 1b: everything else (files + drop-ins + unit body create/update/adopt + skip/conflict/orphan/cleanup)
+	for _, a := range plan.Actions {
+		if isUnitBodyDelete(a) {
+			continue // handled above
+		}
+		oc := applyOne(a, resources, w, m, now)
+		r.Outcomes = append(r.Outcomes, oc)
+		if a.Kind == diff.KindUnit && oc.Status == StatusApplied {
+			ev := getEvents(a.UnitName)
+			isBody := filepath.Base(a.Path) == a.UnitName
+			recordUnitEvent(ev, a.Action, isBody)
+		}
+	}
+
+	// Phase 2: daemon-reload if any unit file was mutated.
+	if anyUnitMutation(events) {
+		err := sd.DaemonReload()
+		oc := Outcome{Path: "daemon-reload", Action: diff.ActionUpdate}
+		if err != nil {
+			oc.Status = StatusErrored
+			oc.Err = err
+		} else {
+			oc.Status = StatusApplied
+		}
+		r.Outcomes = append(r.Outcomes, oc)
+	}
+
+	// Phase 3: per-IR-unit state reconciliation. Walks IR.Units (deleted
+	// units are not in the IR, so they're not visited here).
+	for _, u := range in.Units {
+		ev := events[u.Name]
+		if ev == nil {
+			ev = &unitEvents{}
+		}
+		outcomes := reconcileUnitState(u, ev, sd)
+		r.Outcomes = append(r.Outcomes, outcomes...)
+	}
+
 	return r
 }
 
-func indexFiles(in []ir.File) map[string]ir.File {
-	out := make(map[string]ir.File, len(in))
-	for _, f := range in {
-		out[f.Path] = f
+func indexResources(in *ir.IR) map[string]pendingResource {
+	out := map[string]pendingResource{}
+	for _, f := range in.Files {
+		out[f.Path] = pendingResource{
+			Path:     f.Path,
+			Mode:     f.Mode,
+			UID:      f.UID,
+			GID:      f.GID,
+			Contents: f.Contents,
+			Kind:     manifest.KindFile,
+		}
+	}
+	for _, u := range in.Units {
+		if len(u.Contents) > 0 {
+			path := diff.UnitPath(u.Name)
+			out[path] = pendingResource{
+				Path:     path,
+				Mode:     0o644,
+				Contents: []byte(u.Contents),
+				Kind:     manifest.KindUnit,
+			}
+		}
+		for _, di := range u.DropIns {
+			path := diff.DropInPath(u.Name, di.Name)
+			out[path] = pendingResource{
+				Path:     path,
+				Mode:     0o644,
+				Contents: []byte(di.Contents),
+				Kind:     manifest.KindUnit,
+			}
+		}
 	}
 	return out
 }
 
-func applyOne(a diff.ResourceAction, files map[string]ir.File, w hostfs.Writer, m *manifest.Manifest, now time.Time) Outcome {
+// isUnitBodyDelete reports whether a is the special "delete a unit's body
+// file" case that requires disable-now before unlink. Drop-in deletes do
+// not qualify — their parent unit's enablement is independent.
+func isUnitBodyDelete(a diff.ResourceAction) bool {
+	if a.Kind != diff.KindUnit || a.Action != diff.ActionDelete {
+		return false
+	}
+	return filepath.Base(a.Path) == a.UnitName
+}
+
+// applyUnitBodyDelete runs disable --now then unlinks the unit body file.
+// Either step's failure is reported as the outcome's error; if disable-now
+// fails the file is NOT unlinked (that would orphan systemd's runtime state).
+func applyUnitBodyDelete(a diff.ResourceAction, w hostfs.Writer, m *manifest.Manifest, sd systemd.Manager) Outcome {
+	oc := Outcome{Path: a.Path, Action: a.Action}
+	if err := sd.DisableNow(a.UnitName); err != nil {
+		oc.Status = StatusErrored
+		oc.Err = fmt.Errorf("disable --now %s: %w", a.UnitName, err)
+		return oc
+	}
+	if err := w.Remove(a.Path); err != nil {
+		oc.Status = StatusErrored
+		oc.Err = err
+		return oc
+	}
+	m.Delete(a.Path)
+	oc.Status = StatusApplied
+	oc.Reason = "disabled, stopped, removed"
+	return oc
+}
+
+func applyOne(a diff.ResourceAction, resources map[string]pendingResource, w hostfs.Writer, m *manifest.Manifest, now time.Time) Outcome {
 	oc := Outcome{Path: a.Path, Action: a.Action}
 
 	switch a.Action {
@@ -132,6 +271,8 @@ func applyOne(a diff.ResourceAction, files map[string]ir.File, w hostfs.Writer, 
 		return oc
 
 	case diff.ActionDelete:
+		// Plain file delete or drop-in delete. Unit body deletes are routed
+		// through applyUnitBodyDelete by the caller.
 		if err := w.Remove(a.Path); err != nil {
 			oc.Status = StatusErrored
 			oc.Err = err
@@ -143,13 +284,13 @@ func applyOne(a diff.ResourceAction, files map[string]ir.File, w hostfs.Writer, 
 		return oc
 
 	case diff.ActionCreate, diff.ActionUpdate:
-		f, ok := files[a.Path]
+		r, ok := resources[a.Path]
 		if !ok {
 			oc.Status = StatusErrored
 			oc.Err = fmt.Errorf("internal: %s action references unknown IR path %s", a.Action, a.Path)
 			return oc
 		}
-		if err := w.WriteFile(a.Path, f.Contents, f.Mode, f.UID, f.GID); err != nil {
+		if err := w.WriteFile(a.Path, r.Contents, r.Mode, r.UID, r.GID); err != nil {
 			oc.Status = StatusErrored
 			oc.Err = err
 			return oc
@@ -162,12 +303,12 @@ func applyOne(a diff.ResourceAction, files map[string]ir.File, w hostfs.Writer, 
 				origin = existing.Origin
 			}
 		}
-		m.PutActive(a.Path, hashBytes(f.Contents), origin, now)
+		m.PutActive(a.Path, r.Kind, diff.HashContent(r.Contents, diffKind(r.Kind)), origin, now)
 		oc.Status = StatusApplied
 		return oc
 
 	case diff.ActionAdopt:
-		f, ok := files[a.Path]
+		r, ok := resources[a.Path]
 		if !ok {
 			oc.Status = StatusErrored
 			oc.Err = fmt.Errorf("internal: adopt action references unknown IR path %s", a.Path)
@@ -182,12 +323,12 @@ func applyOne(a diff.ResourceAction, files map[string]ir.File, w hostfs.Writer, 
 			oc.Err = err
 			return oc
 		}
-		if hashBytes(body) != hashBytes(f.Contents) {
+		if diff.HashContent(body, diffKind(r.Kind)) != diff.HashContent(r.Contents, diffKind(r.Kind)) {
 			oc.Status = StatusSkipped
 			oc.Reason = "drifted between plan and apply"
 			return oc
 		}
-		m.PutActive(a.Path, hashBytes(f.Contents), manifest.OriginAdopt, now)
+		m.PutActive(a.Path, r.Kind, diff.HashContent(r.Contents, diffKind(r.Kind)), manifest.OriginAdopt, now)
 		oc.Status = StatusApplied
 		oc.Reason = "adopted, no write"
 		return oc
@@ -199,7 +340,126 @@ func applyOne(a diff.ResourceAction, files map[string]ir.File, w hostfs.Writer, 
 	}
 }
 
-func hashBytes(b []byte) string {
-	h := sha256.Sum256(b)
-	return "sha256:" + hex.EncodeToString(h[:])
+// diffKind translates a manifest.Kind to a diff.Kind for hash computation.
+// They mirror each other but live in separate packages to avoid coupling.
+func diffKind(k manifest.Kind) diff.Kind {
+	if k == manifest.KindUnit {
+		return diff.KindUnit
+	}
+	return diff.KindFile
+}
+
+// unitEvents tracks what happened to a unit's files during phase 1, so phase 3
+// can decide whether to enable, disable, restart, or skip.
+type unitEvents struct {
+	bodyCreated   bool
+	bodyUpdated   bool
+	bodyAdopted   bool
+	bodyDeleted   bool
+	dropInChange  bool // any drop-in create/update/delete (not adopt)
+	hasContentMut bool // any mutation that requires daemon-reload (excludes adopts)
+}
+
+func recordUnitEvent(ev *unitEvents, action diff.Action, isBody bool) {
+	switch action {
+	case diff.ActionCreate:
+		if isBody {
+			ev.bodyCreated = true
+		} else {
+			ev.dropInChange = true
+		}
+		ev.hasContentMut = true
+	case diff.ActionUpdate:
+		if isBody {
+			ev.bodyUpdated = true
+		} else {
+			ev.dropInChange = true
+		}
+		ev.hasContentMut = true
+	case diff.ActionAdopt:
+		if isBody {
+			ev.bodyAdopted = true
+		}
+		// adopts don't trigger daemon-reload or restart
+	case diff.ActionDelete:
+		// Drop-in deletes get here (body deletes are routed elsewhere)
+		ev.dropInChange = true
+		ev.hasContentMut = true
+	}
+}
+
+func anyUnitMutation(events map[string]*unitEvents) bool {
+	for _, ev := range events {
+		if ev.hasContentMut || ev.bodyDeleted {
+			return true
+		}
+	}
+	return false
+}
+
+// reconcileUnitState drives systemd state for one IR unit after files +
+// daemon-reload have settled. Returns one outcome per systemctl operation
+// performed (so the apply output mirrors the spec example's per-line format).
+func reconcileUnitState(u ir.Unit, ev *unitEvents, sd systemd.Manager) []Outcome {
+	if ev.bodyDeleted {
+		// Disable+stop already happened in phase 1; nothing more to do.
+		return nil
+	}
+	var outcomes []Outcome
+
+	// Newly-created units: combine enable + start if declared enabled.
+	// Disabled-on-create units are written but not started.
+	if ev.bodyCreated {
+		if u.Enabled {
+			err := sd.EnableNow(u.Name)
+			outcomes = append(outcomes, unitOutcome(u.Name, "enable --now", err))
+		}
+		return outcomes
+	}
+
+	// Existing unit (not newly created): reconcile enablement every apply.
+	current, err := sd.IsEnabled(u.Name)
+	if err != nil {
+		outcomes = append(outcomes, unitOutcome(u.Name, "is-enabled", err))
+	} else {
+		switch {
+		case u.Enabled && (current == systemd.EnablementDisabled || current == systemd.EnablementUnknown):
+			err := sd.Enable(u.Name)
+			outcomes = append(outcomes, unitOutcome(u.Name, "enable", err))
+		case !u.Enabled && current == systemd.EnablementEnabled:
+			err := sd.Disable(u.Name)
+			outcomes = append(outcomes, unitOutcome(u.Name, "disable", err))
+		}
+	}
+
+	// Restart-if-active for content changes (excludes adopts and skips).
+	// Inactive units whose content changed are rewritten only — the new
+	// content takes effect on next start. Logged for visibility.
+	if ev.hasContentMut {
+		active, _ := sd.IsActive(u.Name)
+		if active {
+			err := sd.Restart(u.Name)
+			outcomes = append(outcomes, unitOutcome(u.Name, "restart", err))
+		} else {
+			outcomes = append(outcomes, Outcome{
+				Path:   u.Name,
+				Action: diff.ActionUpdate,
+				Status: StatusApplied,
+				Reason: "content updated, inactive — change takes effect on next start",
+			})
+		}
+	}
+
+	return outcomes
+}
+
+func unitOutcome(unit, op string, err error) Outcome {
+	oc := Outcome{Path: unit, Action: diff.ActionUpdate, Reason: op}
+	if err != nil {
+		oc.Status = StatusErrored
+		oc.Err = err
+	} else {
+		oc.Status = StatusApplied
+	}
+	return oc
 }

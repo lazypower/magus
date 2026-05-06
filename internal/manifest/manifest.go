@@ -39,9 +39,21 @@ const (
 type Origin string
 
 const (
-	OriginCreate      Origin = "create"
-	OriginAdopt       Origin = "adopt"
-	OriginForceAdopt  Origin = "force-adopt"
+	OriginCreate     Origin = "create"
+	OriginAdopt      Origin = "adopt"
+	OriginForceAdopt Origin = "force-adopt"
+)
+
+// Kind identifies what type of resource a manifest entry represents. The
+// orphan-sweep delete path needs this to know whether to call
+// 'systemctl disable --now' before unlinking the file (units) or to just
+// unlink (files). Older v1 manifests written before units landed have an
+// empty Kind, which Load coerces to KindFile for backwards compatibility.
+type Kind string
+
+const (
+	KindFile Kind = "file"
+	KindUnit Kind = "unit"
 )
 
 // Manifest is the on-disk shape. Resources is keyed by absolute path.
@@ -51,8 +63,13 @@ type Manifest struct {
 }
 
 // Resource is one path under magus management.
+//
+// Kind defaults to KindFile when absent so the orphan-sweep delete path knows
+// whether to disable+stop a unit before unlinking it. Older manifests written
+// before units landed have empty Kind, treated as files for safety.
 type Resource struct {
 	State          State      `json:"state"`
+	Kind           Kind       `json:"kind,omitempty"`
 	Hash           string     `json:"hash"`
 	AppliedAt      time.Time  `json:"applied_at"`
 	Origin         Origin     `json:"origin"`
@@ -87,6 +104,15 @@ func Load(path string) (*Manifest, error) {
 	}
 	if m.Resources == nil {
 		m.Resources = map[string]Resource{}
+	}
+	// Coerce empty Kind to KindFile for entries written by binaries that
+	// predate the unit support — the manifest schema is forwards-compatible
+	// in this direction without a version bump.
+	for path, r := range m.Resources {
+		if r.Kind == "" {
+			r.Kind = KindFile
+			m.Resources[path] = r
+		}
 	}
 	return &m, nil
 }
@@ -129,9 +155,10 @@ func (m *Manifest) Get(path string) (Resource, bool) {
 
 // PutActive records (or replaces) an active entry for path. Used by apply
 // after a successful create/update/adopt.
-func (m *Manifest) PutActive(path, hash string, origin Origin, at time.Time) {
+func (m *Manifest) PutActive(path string, kind Kind, hash string, origin Origin, at time.Time) {
 	m.Resources[path] = Resource{
 		State:     StateActive,
+		Kind:      kind,
 		Hash:      hash,
 		AppliedAt: at,
 		Origin:    origin,

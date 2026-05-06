@@ -132,7 +132,7 @@ func runAdopt(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: write %s: %v\n", target, err)
 		return 1
 	}
-	m.PutActive(target, declared_, manifest.OriginForceAdopt, time.Now().UTC())
+	m.PutActive(target, manifest.KindFile, declared_, manifest.OriginForceAdopt, time.Now().UTC())
 	if err := m.Save(*manifestPath); err != nil {
 		fmt.Fprintf(os.Stderr, "error: save manifest: %v\n", err)
 		return 1

@@ -71,7 +71,7 @@ func TestSkipWhenOwnedAndUnchanged(t *testing.T) {
 		},
 	}
 	m := manifest.New()
-	m.PutActive("/etc/magus.d/foo", "sha256:abc", manifest.OriginCreate, time.Now())
+	m.PutActive("/etc/magus.d/foo", manifest.KindFile, "sha256:abc", manifest.OriginCreate, time.Now())
 	fs := memFS{
 		"/etc/magus.d/foo": {contents: []byte("hi"), mode: 0o644, uid: 1000, gid: 1000},
 	}
@@ -111,7 +111,7 @@ func TestUpdateWhenOwnedAndContentDiffers(t *testing.T) {
 		},
 	}
 	m := manifest.New()
-	m.PutActive("/etc/magus.d/foo", "sha256:old", manifest.OriginCreate, time.Now())
+	m.PutActive("/etc/magus.d/foo", manifest.KindFile, "sha256:old", manifest.OriginCreate, time.Now())
 	fs := memFS{
 		"/etc/magus.d/foo": {contents: []byte("old"), mode: 0o644},
 	}
@@ -164,7 +164,7 @@ func TestModeMismatchTreatedAsDiff(t *testing.T) {
 
 	t.Run("owned/update", func(t *testing.T) {
 		m := manifest.New()
-		m.PutActive("/etc/magus.d/foo", "sha256:x", manifest.OriginCreate, time.Now())
+		m.PutActive("/etc/magus.d/foo", manifest.KindFile, "sha256:x", manifest.OriginCreate, time.Now())
 		plan, _ := Compute(mkIR(), m, fs)
 		a := findAction(t, plan, "/etc/magus.d/foo")
 		if a.Action != ActionUpdate {
@@ -184,7 +184,7 @@ func TestDelete(t *testing.T) {
 	// Manifest owns a path, IR doesn't declare it, file exists → delete.
 	in := &ir.IR{}
 	m := manifest.New()
-	m.PutActive("/etc/magus.d/gone", "sha256:x", manifest.OriginCreate, time.Now())
+	m.PutActive("/etc/magus.d/gone", manifest.KindFile, "sha256:x", manifest.OriginCreate, time.Now())
 	fs := memFS{
 		"/etc/magus.d/gone": {contents: []byte("x"), mode: 0o644},
 	}
@@ -199,7 +199,7 @@ func TestStaleClean(t *testing.T) {
 	// Manifest owns a path, IR doesn't declare it, file is gone → stale-clean.
 	in := &ir.IR{}
 	m := manifest.New()
-	m.PutActive("/etc/magus.d/gone", "sha256:x", manifest.OriginCreate, time.Now())
+	m.PutActive("/etc/magus.d/gone", manifest.KindFile, "sha256:x", manifest.OriginCreate, time.Now())
 	plan, _ := Compute(in, m, memFS{})
 	a := findAction(t, plan, "/etc/magus.d/gone")
 	if a.Action != ActionCleanup {
@@ -217,7 +217,7 @@ func TestOrphanedDominates(t *testing.T) {
 			{Path: "/etc/secret", Mode: 0o600, Contents: []byte("x")},
 		}}
 		m := manifest.New()
-		m.PutActive("/etc/secret", "sha256:x", manifest.OriginCreate, now)
+		m.PutActive("/etc/secret", manifest.KindFile, "sha256:x", manifest.OriginCreate, now)
 		m.Orphan("/etc/secret", "policy deny", now)
 		plan, _ := Compute(in, m, memFS{
 			"/etc/secret": {contents: []byte("x"), mode: 0o600},
@@ -230,7 +230,7 @@ func TestOrphanedDominates(t *testing.T) {
 
 	t.Run("undeclared", func(t *testing.T) {
 		m := manifest.New()
-		m.PutActive("/etc/secret", "sha256:x", manifest.OriginCreate, now)
+		m.PutActive("/etc/secret", manifest.KindFile, "sha256:x", manifest.OriginCreate, now)
 		m.Orphan("/etc/secret", "policy deny", now)
 		plan, _ := Compute(&ir.IR{}, m, memFS{
 			"/etc/secret": {contents: []byte("x"), mode: 0o600},
@@ -243,13 +243,15 @@ func TestOrphanedDominates(t *testing.T) {
 }
 
 func TestDeferredCount(t *testing.T) {
+	// Units are no longer deferred — only directories remain. A unit with
+	// neither body content nor drop-ins emits no actions.
 	in := &ir.IR{
 		Directories: []ir.Directory{{Path: "/var/lib/magus"}},
 		Units:       []ir.Unit{{Name: "magus-foo.service"}},
 	}
 	plan, _ := Compute(in, manifest.New(), memFS{})
-	if plan.Deferred != 2 {
-		t.Errorf("Deferred = %d, want 2", plan.Deferred)
+	if plan.Deferred != 1 {
+		t.Errorf("Deferred = %d, want 1", plan.Deferred)
 	}
 }
 

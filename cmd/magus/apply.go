@@ -15,6 +15,7 @@ import (
 	"github.com/lazypower/magus/internal/ir"
 	"github.com/lazypower/magus/internal/manifest"
 	"github.com/lazypower/magus/internal/policy"
+	"github.com/lazypower/magus/internal/systemd"
 )
 
 const applyUsage = `magus apply — reconcile the system toward the declared state
@@ -93,7 +94,7 @@ func runApply(args []string) int {
 	}
 	fmt.Println()
 
-	result := apply.Apply(plan, parsed, w, m, time.Now().UTC())
+	result := apply.Apply(plan, parsed, w, m, systemd.OS(), time.Now().UTC())
 	for _, oc := range result.Outcomes {
 		printOutcome(os.Stdout, oc)
 	}

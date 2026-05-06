@@ -176,7 +176,9 @@ func runReclaim(args []string) int {
 	if *force && mismatchedFromIR {
 		finalHash = declaredHash
 	}
-	m.PutActive(target, finalHash, entry.Origin, time.Now().UTC())
+	// Preserve the kind from the orphaned entry — reclaiming a unit must
+	// not silently demote it to a file.
+	m.PutActive(target, entry.Kind, finalHash, entry.Origin, time.Now().UTC())
 	if err := m.Save(*manifestPath); err != nil {
 		fmt.Fprintf(os.Stderr, "error: save manifest: %v\n", err)
 		return 1

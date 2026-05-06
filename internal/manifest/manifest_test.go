@@ -38,8 +38,8 @@ func TestRoundTrip(t *testing.T) {
 
 	m := New()
 	now := time.Date(2026, 5, 1, 18, 30, 0, 0, time.UTC)
-	m.PutActive("/etc/magus.d/foo.env", "sha256:abc", OriginCreate, now)
-	m.PutActive("/etc/magus.d/bar.env", "sha256:def", OriginAdopt, now)
+	m.PutActive("/etc/magus.d/foo.env", KindFile, "sha256:abc", OriginCreate, now)
+	m.PutActive("/etc/magus.d/bar.env", KindFile, "sha256:def", OriginAdopt, now)
 	m.Orphan("/etc/magus.d/bar.env", "policy deny", now)
 
 	if err := m.Save(path); err != nil {
@@ -73,7 +73,7 @@ func TestSaveAtomic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.json")
 	m := New()
-	m.PutActive("/x", "sha256:abc", OriginCreate, time.Now())
+	m.PutActive("/x", KindFile, "sha256:abc", OriginCreate, time.Now())
 	if err := m.Save(path); err != nil {
 		t.Fatal(err)
 	}

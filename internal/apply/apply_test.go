@@ -11,6 +11,7 @@ import (
 	"github.com/lazypower/magus/internal/hostfs"
 	"github.com/lazypower/magus/internal/ir"
 	"github.com/lazypower/magus/internal/manifest"
+	"github.com/lazypower/magus/internal/systemd"
 )
 
 // memFile is one entry in the in-memory test filesystem.
@@ -103,7 +104,7 @@ func TestCreate(t *testing.T) {
 	plan, _ := diff.Compute(in, manifest.New(), w)
 	m := manifest.New()
 	now := time.Now()
-	r := Apply(plan, in, w, m, now)
+	r := Apply(plan, in, w, m, systemd.NewFake(), now)
 
 	if a, _, _, _ := r.Counts(); a != 1 {
 		t.Errorf("applied = %d, want 1", a)
@@ -134,10 +135,10 @@ func TestUpdatePreservesAdoptOrigin(t *testing.T) {
 		{Path: "/etc/magus.d/foo", Mode: 0o644, Contents: []byte("new")},
 	}}
 	m := manifest.New()
-	m.PutActive("/etc/magus.d/foo", "sha256:old", manifest.OriginAdopt, time.Now())
+	m.PutActive("/etc/magus.d/foo", manifest.KindFile, "sha256:old", manifest.OriginAdopt, time.Now())
 
 	plan, _ := diff.Compute(in, m, w)
-	r := Apply(plan, in, w, m, time.Now())
+	r := Apply(plan, in, w, m, systemd.NewFake(), time.Now())
 
 	if r.ExitCode() != 0 {
 		t.Fatalf("exit = %d, want 0", r.ExitCode())
@@ -168,7 +169,7 @@ func TestAdoptRecordsManifestNoWrite(t *testing.T) {
 	// surface if it were touched.
 	w.injectError("/etc/magus.d/foo", errors.New("apply tried to write during adopt"))
 
-	r := Apply(plan, in, w, m, time.Now())
+	r := Apply(plan, in, w, m, systemd.NewFake(), time.Now())
 	if r.ExitCode() != 0 {
 		t.Fatalf("exit = %d, errors: %v", r.ExitCode(), r.Outcomes)
 	}
@@ -196,7 +197,7 @@ func TestAdoptDriftSkipped(t *testing.T) {
 	w.preload("/etc/magus.d/foo", memFile{contents: []byte("DRIFTED"), mode: 0o644})
 
 	m := manifest.New()
-	r := Apply(plan, in, w, m, time.Now())
+	r := Apply(plan, in, w, m, systemd.NewFake(), time.Now())
 	if _, _, s, _ := r.Counts(); s != 1 {
 		t.Errorf("skipped = %d, want 1", s)
 	}
@@ -209,10 +210,10 @@ func TestDelete(t *testing.T) {
 	w := newMemWriter()
 	w.preload("/etc/magus.d/gone", memFile{contents: []byte("x"), mode: 0o644})
 	m := manifest.New()
-	m.PutActive("/etc/magus.d/gone", "sha256:x", manifest.OriginCreate, time.Now())
+	m.PutActive("/etc/magus.d/gone", manifest.KindFile, "sha256:x", manifest.OriginCreate, time.Now())
 
 	plan, _ := diff.Compute(&ir.IR{}, m, w)
-	r := Apply(plan, &ir.IR{}, w, m, time.Now())
+	r := Apply(plan, &ir.IR{}, w, m, systemd.NewFake(), time.Now())
 
 	if r.ExitCode() != 0 {
 		t.Fatalf("exit = %d", r.ExitCode())
@@ -230,10 +231,10 @@ func TestCleanup(t *testing.T) {
 	// clean the manifest entry without erroring.
 	w := newMemWriter()
 	m := manifest.New()
-	m.PutActive("/etc/magus.d/ghost", "sha256:x", manifest.OriginCreate, time.Now())
+	m.PutActive("/etc/magus.d/ghost", manifest.KindFile, "sha256:x", manifest.OriginCreate, time.Now())
 
 	plan, _ := diff.Compute(&ir.IR{}, m, w)
-	r := Apply(plan, &ir.IR{}, w, m, time.Now())
+	r := Apply(plan, &ir.IR{}, w, m, systemd.NewFake(), time.Now())
 
 	if r.ExitCode() != 0 {
 		t.Fatalf("exit = %d", r.ExitCode())
@@ -251,7 +252,7 @@ func TestConflictSkippedAndUntouched(t *testing.T) {
 	}}
 	plan, _ := diff.Compute(in, manifest.New(), w)
 	m := manifest.New()
-	r := Apply(plan, in, w, m, time.Now())
+	r := Apply(plan, in, w, m, systemd.NewFake(), time.Now())
 
 	if r.ExitCode() != 2 {
 		t.Errorf("exit = %d, want 2 (conflict)", r.ExitCode())
@@ -268,11 +269,11 @@ func TestOrphanedSkipped(t *testing.T) {
 	w := newMemWriter()
 	w.preload("/etc/secret", memFile{contents: []byte("x"), mode: 0o600})
 	m := manifest.New()
-	m.PutActive("/etc/secret", "sha256:x", manifest.OriginCreate, time.Now())
+	m.PutActive("/etc/secret", manifest.KindFile, "sha256:x", manifest.OriginCreate, time.Now())
 	m.Orphan("/etc/secret", "policy deny", time.Now())
 
 	plan, _ := diff.Compute(&ir.IR{}, m, w)
-	r := Apply(plan, &ir.IR{}, w, m, time.Now())
+	r := Apply(plan, &ir.IR{}, w, m, systemd.NewFake(), time.Now())
 
 	if r.ExitCode() != 2 {
 		t.Errorf("exit = %d, want 2", r.ExitCode())
@@ -295,7 +296,7 @@ func TestErrorIsolation(t *testing.T) {
 
 	plan, _ := diff.Compute(in, manifest.New(), w)
 	m := manifest.New()
-	r := Apply(plan, in, w, m, time.Now())
+	r := Apply(plan, in, w, m, systemd.NewFake(), time.Now())
 
 	if r.ExitCode() != 1 {
 		t.Errorf("exit = %d, want 1 (errors dominate)", r.ExitCode())
