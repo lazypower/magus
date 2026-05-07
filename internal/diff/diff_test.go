@@ -11,11 +11,14 @@ import (
 	"github.com/lazypower/magus/internal/manifest"
 )
 
-// memFile is one entry in the in-memory test filesystem.
+// memFile is one entry in the in-memory test filesystem. isDir distinguishes
+// directories from files since both share the path → metadata mapping but
+// directories carry no contents.
 type memFile struct {
 	contents []byte
 	mode     uint32
 	uid, gid int
+	isDir    bool
 }
 
 type memFS map[string]memFile
@@ -30,7 +33,7 @@ func (m memFS) Stat(path string) (hostfs.FileInfo, error) {
 
 func (m memFS) ReadFile(path string) ([]byte, error) {
 	f, ok := m[path]
-	if !ok {
+	if !ok || f.isDir {
 		return nil, &fs.PathError{Op: "open", Path: path, Err: errors.New("not found")}
 	}
 	return f.contents, nil
@@ -240,19 +243,6 @@ func TestOrphanedDominates(t *testing.T) {
 			t.Errorf("Action = %s (%s)", a.Action, a.Reason)
 		}
 	})
-}
-
-func TestDeferredCount(t *testing.T) {
-	// Units are no longer deferred — only directories remain. A unit with
-	// neither body content nor drop-ins emits no actions.
-	in := &ir.IR{
-		Directories: []ir.Directory{{Path: "/var/lib/magus"}},
-		Units:       []ir.Unit{{Name: "magus-foo.service"}},
-	}
-	plan, _ := Compute(in, manifest.New(), memFS{})
-	if plan.Deferred != 1 {
-		t.Errorf("Deferred = %d, want 1", plan.Deferred)
-	}
 }
 
 func TestHasChanges(t *testing.T) {

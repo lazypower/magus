@@ -21,24 +21,41 @@ type memFile struct {
 	uid, gid int
 }
 
-// memWriter is a hostfs.Writer backed by a map. Test code can preload state,
+// memDir is one directory entry in the in-memory test filesystem.
+type memDir struct {
+	mode     uint32
+	uid, gid int
+}
+
+// memWriter is a hostfs.Writer backed by maps. Test code can preload state,
 // drive Apply, and inspect the resulting state. Optional injectErr causes the
 // next mutating call against the matching path to fail — used to test
 // per-resource error isolation.
 type memWriter struct {
 	mu        sync.Mutex
 	files     map[string]memFile
+	dirs      map[string]memDir
 	injectErr map[string]error
 }
 
 func newMemWriter() *memWriter {
-	return &memWriter{files: map[string]memFile{}, injectErr: map[string]error{}}
+	return &memWriter{
+		files:     map[string]memFile{},
+		dirs:      map[string]memDir{},
+		injectErr: map[string]error{},
+	}
 }
 
 func (m *memWriter) preload(path string, f memFile) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.files[path] = f
+}
+
+func (m *memWriter) preloadDir(path string, d memDir) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dirs[path] = d
 }
 
 func (m *memWriter) injectError(path string, err error) {
@@ -50,11 +67,13 @@ func (m *memWriter) injectError(path string, err error) {
 func (m *memWriter) Stat(path string) (hostfs.FileInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	f, ok := m.files[path]
-	if !ok {
-		return hostfs.FileInfo{Exists: false}, nil
+	if f, ok := m.files[path]; ok {
+		return hostfs.FileInfo{Exists: true, Mode: f.mode, UID: f.uid, GID: f.gid}, nil
 	}
-	return hostfs.FileInfo{Exists: true, Mode: f.mode, UID: f.uid, GID: f.gid}, nil
+	if d, ok := m.dirs[path]; ok {
+		return hostfs.FileInfo{Exists: true, Mode: d.mode, UID: d.uid, GID: d.gid}, nil
+	}
+	return hostfs.FileInfo{Exists: false}, nil
 }
 
 func (m *memWriter) ReadFile(path string) ([]byte, error) {
@@ -94,6 +113,74 @@ func (m *memWriter) Remove(path string) error {
 	}
 	delete(m.files, path)
 	return nil
+}
+
+func (m *memWriter) Mkdir(path string, mode uint32, uid, gid *int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err, ok := m.injectErr[path]; ok {
+		delete(m.injectErr, path)
+		return err
+	}
+	d := memDir{mode: mode}
+	if uid != nil {
+		d.uid = *uid
+	}
+	if gid != nil {
+		d.gid = *gid
+	}
+	m.dirs[path] = d
+	return nil
+}
+
+func (m *memWriter) Chmod(path string, mode uint32) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err, ok := m.injectErr[path]; ok {
+		delete(m.injectErr, path)
+		return err
+	}
+	if d, ok := m.dirs[path]; ok {
+		d.mode = mode
+		m.dirs[path] = d
+		return nil
+	}
+	if f, ok := m.files[path]; ok {
+		f.mode = mode
+		m.files[path] = f
+		return nil
+	}
+	return &fs.PathError{Op: "chmod", Path: path, Err: errors.New("not found")}
+}
+
+func (m *memWriter) Chown(path string, uid, gid *int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err, ok := m.injectErr[path]; ok {
+		delete(m.injectErr, path)
+		return err
+	}
+	if d, ok := m.dirs[path]; ok {
+		if uid != nil {
+			d.uid = *uid
+		}
+		if gid != nil {
+			d.gid = *gid
+		}
+		m.dirs[path] = d
+		return nil
+	}
+	if f, ok := m.files[path]; ok {
+		if uid != nil {
+			f.uid = *uid
+		}
+		if gid != nil {
+			f.gid = *gid
+		}
+		m.files[path] = f
+		return nil
+	}
+	return &fs.PathError{Op: "chown", Path: path, Err: errors.New("not found")}
 }
 
 func TestCreate(t *testing.T) {

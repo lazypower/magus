@@ -87,10 +87,10 @@ func (r *Result) ExitCode() int {
 	return 0
 }
 
-// pendingResource is a unified view of a path the IR declares. Files and
-// units flatten to the same shape so the file-mutation phase doesn't have to
-// branch — the only Kind-specific concern is which manifest Kind to record
-// and which hash function applies.
+// pendingResource is a unified view of a path the IR declares. Files, units,
+// and directories flatten to the same shape; Contents is empty for
+// directories and the apply path branches on Kind when content matters
+// (writes vs mkdir+chmod+chown).
 type pendingResource struct {
 	Path     string
 	Mode     uint32
@@ -216,6 +216,15 @@ func indexResources(in *ir.IR) map[string]pendingResource {
 			}
 		}
 	}
+	for _, d := range in.Directories {
+		out[d.Path] = pendingResource{
+			Path: d.Path,
+			Mode: d.Mode,
+			UID:  d.UID,
+			GID:  d.GID,
+			Kind: manifest.KindDirectory,
+		}
+	}
 	return out
 }
 
@@ -290,6 +299,9 @@ func applyOne(a diff.ResourceAction, resources map[string]pendingResource, w hos
 			oc.Err = fmt.Errorf("internal: %s action references unknown IR path %s", a.Action, a.Path)
 			return oc
 		}
+		if r.Kind == manifest.KindDirectory {
+			return applyDirectoryCreateOrUpdate(a, r, w, m, now)
+		}
 		if err := w.WriteFile(a.Path, r.Contents, r.Mode, r.UID, r.GID); err != nil {
 			oc.Status = StatusErrored
 			oc.Err = err
@@ -313,6 +325,9 @@ func applyOne(a diff.ResourceAction, resources map[string]pendingResource, w hos
 			oc.Status = StatusErrored
 			oc.Err = fmt.Errorf("internal: adopt action references unknown IR path %s", a.Path)
 			return oc
+		}
+		if r.Kind == manifest.KindDirectory {
+			return applyDirectoryAdopt(a, r, w, m, now)
 		}
 		// Re-verify on-disk hash equals declared hash. Conditions may have
 		// changed between plan and apply — adoption is bounded by exact
@@ -340,13 +355,84 @@ func applyOne(a diff.ResourceAction, resources map[string]pendingResource, w hos
 	}
 }
 
+// applyDirectoryCreateOrUpdate handles the directory create and update paths.
+// Create: mkdir -p with declared mode, chown if specified. Update: chmod
+// and/or chown only — directory contents are never touched. The same hash
+// sentinel ("sha256:dir") is recorded for all directory entries since
+// content is not part of equivalence.
+func applyDirectoryCreateOrUpdate(a diff.ResourceAction, r pendingResource, w hostfs.Writer, m *manifest.Manifest, now time.Time) Outcome {
+	oc := Outcome{Path: a.Path, Action: a.Action}
+	if a.Action == diff.ActionCreate {
+		if err := w.Mkdir(a.Path, r.Mode, r.UID, r.GID); err != nil {
+			oc.Status = StatusErrored
+			oc.Err = err
+			return oc
+		}
+	} else { // Update
+		if err := w.Chmod(a.Path, r.Mode); err != nil {
+			oc.Status = StatusErrored
+			oc.Err = err
+			return oc
+		}
+		if err := w.Chown(a.Path, r.UID, r.GID); err != nil {
+			oc.Status = StatusErrored
+			oc.Err = err
+			return oc
+		}
+	}
+	origin := manifest.OriginCreate
+	if a.Action == diff.ActionUpdate {
+		if existing, ok := m.Get(a.Path); ok {
+			origin = existing.Origin
+		}
+	}
+	m.PutActive(a.Path, manifest.KindDirectory, dirHash, origin, now)
+	oc.Status = StatusApplied
+	return oc
+}
+
+// applyDirectoryAdopt records ownership of an existing directory whose mode
+// and ownership already match the IR. Adoption re-verifies metadata at apply
+// time so a directory whose mode changed between plan and apply is skipped
+// rather than silently taken over.
+func applyDirectoryAdopt(a diff.ResourceAction, r pendingResource, w hostfs.Writer, m *manifest.Manifest, now time.Time) Outcome {
+	oc := Outcome{Path: a.Path, Action: a.Action}
+	st, err := w.Stat(a.Path)
+	if err != nil {
+		oc.Status = StatusErrored
+		oc.Err = err
+		return oc
+	}
+	if !st.Exists ||
+		st.Mode != r.Mode ||
+		(r.UID != nil && st.UID != *r.UID) ||
+		(r.GID != nil && st.GID != *r.GID) {
+		oc.Status = StatusSkipped
+		oc.Reason = "drifted between plan and apply"
+		return oc
+	}
+	m.PutActive(a.Path, manifest.KindDirectory, dirHash, manifest.OriginAdopt, now)
+	oc.Status = StatusApplied
+	oc.Reason = "adopted, no write"
+	return oc
+}
+
+// dirHash is the sentinel manifest hash for directory entries. Directories
+// have no content equivalence; the hash field is populated for schema
+// consistency only.
+const dirHash = "sha256:dir"
+
 // diffKind translates a manifest.Kind to a diff.Kind for hash computation.
 // They mirror each other but live in separate packages to avoid coupling.
 func diffKind(k manifest.Kind) diff.Kind {
-	if k == manifest.KindUnit {
+	switch k {
+	case manifest.KindUnit:
 		return diff.KindUnit
+	case manifest.KindDirectory:
+		return diff.KindDirectory
+	default:
+		return diff.KindFile
 	}
-	return diff.KindFile
 }
 
 // unitEvents tracks what happened to a unit's files during phase 1, so phase 3

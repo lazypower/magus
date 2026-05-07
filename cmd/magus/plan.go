@@ -91,11 +91,6 @@ func printPlan(w io.Writer, butanePath string, p *diff.Plan) {
 		fmt.Fprintln(w)
 	}
 
-	if p.Deferred > 0 {
-		fmt.Fprintf(w, "\n  %d resources deferred (directories — not yet implemented)\n",
-			p.Deferred)
-	}
-
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, summary(p))
 }

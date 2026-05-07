@@ -54,6 +54,17 @@ type Writer interface {
 	// Remove unlinks path. A missing file is not an error — apply may
 	// race with out-of-band deletion and the desired state still holds.
 	Remove(path string) error
+	// Mkdir creates path with the given mode and ownership (when specified).
+	// Behaves like 'mkdir -p': intermediate parents are created if missing
+	// (with default 0755), and an existing directory is not an error. Mode
+	// is applied to the leaf even if the directory already existed.
+	Mkdir(path string, mode uint32, uid, gid *int) error
+	// Chmod sets the mode bits of path. Used on existing directories for
+	// metadata-only reconciliation (mkdir already chmodded the leaf).
+	Chmod(path string, mode uint32) error
+	// Chown sets ownership of path. uid/gid are *int with the same nil-means-
+	// no-change semantic as WriteFile.
+	Chown(path string, uid, gid *int) error
 }
 
 // OS returns a Writer backed by the real operating system filesystem.
@@ -138,4 +149,34 @@ func (osImpl) Remove(path string) error {
 		return nil
 	}
 	return err
+}
+
+func (osImpl) Mkdir(path string, mode uint32, uid, gid *int) error {
+	if err := os.MkdirAll(path, os.FileMode(mode)); err != nil {
+		return err
+	}
+	// MkdirAll applies the mode only to dirs it creates and may be subject
+	// to umask; chmod the leaf explicitly to honor the IR-declared mode.
+	if err := os.Chmod(path, os.FileMode(mode)); err != nil {
+		return err
+	}
+	return osImpl{}.Chown(path, uid, gid)
+}
+
+func (osImpl) Chmod(path string, mode uint32) error {
+	return os.Chmod(path, os.FileMode(mode))
+}
+
+func (osImpl) Chown(path string, uid, gid *int) error {
+	chownUID, chownGID := -1, -1
+	if uid != nil {
+		chownUID = *uid
+	}
+	if gid != nil {
+		chownGID = *gid
+	}
+	if chownUID == -1 && chownGID == -1 {
+		return nil
+	}
+	return os.Chown(path, chownUID, chownGID)
 }

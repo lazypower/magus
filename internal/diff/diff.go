@@ -58,9 +58,6 @@ type ResourceAction struct {
 // CLI footer.
 type Plan struct {
 	Actions []ResourceAction
-	// Deferred is a count of IR resources whose Kind isn't yet implemented.
-	// In v1 with units now in scope, only directories appear here.
-	Deferred int
 }
 
 // HasChanges reports whether anything other than skips/cleanup would run.
@@ -177,6 +174,15 @@ func Compute(in *ir.IR, m *manifest.Manifest, fsys hostfs.Reader) (*Plan, error)
 		}
 	}
 
+	for _, d := range in.Directories {
+		declared[d.Path] = true
+		ra, err := diffDirectory(d, m, fsys)
+		if err != nil {
+			return nil, err
+		}
+		plan.Actions = append(plan.Actions, ra)
+	}
+
 	// Manifest sweep: anything magus owns (or has orphaned) that isn't in
 	// the IR needs an action — delete, stale-clean, or orphaned-skip.
 	for path, entry := range m.Resources {
@@ -190,8 +196,67 @@ func Compute(in *ir.IR, m *manifest.Manifest, fsys hostfs.Reader) (*Plan, error)
 		plan.Actions = append(plan.Actions, ra)
 	}
 
-	plan.Deferred = len(in.Directories)
 	return plan, nil
+}
+
+// diffDirectory diffs an IR-declared directory. Equivalence is metadata-only:
+// existence + mode + ownership. Magus does not recurse into directory
+// contents and never deletes directories — even on IR omission, per spec.
+func diffDirectory(d ir.Directory, m *manifest.Manifest, fsys hostfs.Reader) (ResourceAction, error) {
+	ra := ResourceAction{
+		Path:   d.Path,
+		Kind:   KindDirectory,
+		IRMode: d.Mode,
+	}
+
+	if entry, ok := m.Get(d.Path); ok && entry.State == manifest.StateOrphaned {
+		ra.Action = ActionOrphaned
+		ra.Reason = "orphaned: " + entry.OrphanedReason
+		return ra, nil
+	}
+
+	st, err := fsys.Stat(d.Path)
+	if err != nil {
+		return ra, fmt.Errorf("stat %s: %w", d.Path, err)
+	}
+
+	if !st.Exists {
+		ra.Action = ActionCreate
+		return ra, nil
+	}
+
+	ra.OnDiskMode = st.Mode
+	metaMatch := st.Mode == d.Mode &&
+		(d.UID == nil || st.UID == *d.UID) &&
+		(d.GID == nil || st.GID == *d.GID)
+	owned := m.Owns(d.Path)
+
+	switch {
+	case metaMatch && owned:
+		ra.Action = ActionSkip
+		ra.Reason = "unchanged"
+	case metaMatch && !owned:
+		ra.Action = ActionAdopt
+		ra.Reason = "matches IR, claiming ownership"
+	case owned:
+		ra.Action = ActionUpdate
+		ra.Reason = explainDirDiff(st, d)
+	default:
+		ra.Action = ActionConflict
+		ra.Reason = "exists, " + explainDirDiff(st, d) + ", not in manifest"
+	}
+	return ra, nil
+}
+
+func explainDirDiff(st hostfs.FileInfo, d ir.Directory) string {
+	switch {
+	case st.Mode != d.Mode:
+		return fmt.Sprintf("mode %#o → %#o", st.Mode, d.Mode)
+	case d.UID != nil && st.UID != *d.UID, d.GID != nil && st.GID != *d.GID:
+		return fmt.Sprintf("ownership %d:%d → %s", st.UID, st.GID, ownershipDesc(d.UID, d.GID))
+	default:
+		return "differs"
+	}
 }
 
 func diffDeclared(d declaredResource, m *manifest.Manifest, fsys hostfs.Reader) (ResourceAction, error) {
@@ -263,7 +328,8 @@ func diffOrphan(path string, entry manifest.Resource, fsys hostfs.Reader) (Resou
 		return ra, nil
 	}
 
-	// Active manifest entry, no IR declaration → delete or stale-clean.
+	// Active manifest entry, no IR declaration → delete, stale-clean, or
+	// (for directories) skip-with-reason since v1 does not delete dirs.
 	st, err := fsys.Stat(path)
 	if err != nil {
 		return ra, fmt.Errorf("stat %s: %w", path, err)
@@ -271,6 +337,14 @@ func diffOrphan(path string, entry manifest.Resource, fsys hostfs.Reader) (Resou
 	if !st.Exists {
 		ra.Action = ActionCleanup
 		ra.Reason = "manifest entry without on-disk file"
+		return ra, nil
+	}
+	if ra.Kind == KindDirectory {
+		// Spec: directories are never removed even on IR omission. They
+		// may hold user data magus didn't track. The manifest entry stays
+		// for audit; reconciliation does not.
+		ra.Action = ActionSkip
+		ra.Reason = "directory removed from IR; v1 does not delete directories"
 		return ra, nil
 	}
 	ra.Action = ActionDelete
@@ -285,6 +359,8 @@ func kindFromManifest(k manifest.Kind) Kind {
 	switch k {
 	case manifest.KindUnit:
 		return KindUnit
+	case manifest.KindDirectory:
+		return KindDirectory
 	default:
 		return KindFile
 	}
