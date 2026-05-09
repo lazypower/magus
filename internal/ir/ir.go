@@ -12,6 +12,7 @@ type IR struct {
 	Files       []File
 	Directories []Directory
 	Units       []Unit
+	Quadlets    []Quadlet
 }
 
 // File is a declared regular file under storage.files.
@@ -54,4 +55,22 @@ type Unit struct {
 type DropIn struct {
 	Name     string
 	Contents string
+}
+
+// Quadlet is a podman-managed container declaration auto-promoted from a
+// storage.files entry whose path falls under /etc/containers/systemd/ and
+// whose extension is one of v1's supported quadlet types (.container,
+// .volume, .network). The systemd-quadlet generator runs at daemon-reload
+// time and materializes a .service from each quadlet source — that .service
+// is what magus enables, starts, and (on content change) restarts.
+//
+// Name is the basename of Path (e.g., "ollama.container"). The generated
+// .service name is derived from Name via QuadletGeneratedService.
+type Quadlet struct {
+	Path     string
+	Name     string
+	Mode     uint32
+	UID      *int
+	GID      *int
+	Contents []byte
 }

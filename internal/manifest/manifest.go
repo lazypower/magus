@@ -55,6 +55,7 @@ const (
 	KindFile      Kind = "file"
 	KindUnit      Kind = "unit"
 	KindDirectory Kind = "directory"
+	KindQuadlet   Kind = "quadlet"
 )
 
 // Manifest is the on-disk shape. Resources is keyed by absolute path.

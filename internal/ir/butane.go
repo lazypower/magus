@@ -6,12 +6,36 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	butane "github.com/coreos/butane/config"
 	"github.com/coreos/butane/config/common"
 	"github.com/coreos/vcontext/report"
 )
+
+// quadletRoot is the canonical search path the systemd-quadlet generator
+// uses for operator-supplied quadlets. /usr/share/containers/systemd is the
+// image-baked location and is read-only on bootc — we don't manage it.
+const quadletRoot = "/etc/containers/systemd/"
+
+// quadletExtensions are the v1-supported quadlet types. .pod, .kube, .image,
+// and .build are deferred — they have different generated-service-name
+// mappings and aren't on the immediate use case.
+var quadletExtensions = []string{".container", ".volume", ".network"}
+
+func isQuadletPath(path string) bool {
+	if !strings.HasPrefix(path, quadletRoot) {
+		return false
+	}
+	ext := filepath.Ext(path)
+	for _, q := range quadletExtensions {
+		if ext == q {
+			return true
+		}
+	}
+	return false
+}
 
 // LoadButane reads path, runs the Butane → Ignition translation, and extracts
 // the magus IR subset from the resulting Ignition spec.
@@ -42,6 +66,23 @@ func LoadButane(path string) (*IR, []string, error) {
 		contents, err := decodeSource(f.Contents.Source)
 		if err != nil {
 			return nil, warnings, fmt.Errorf("file %s: %w", f.Path, err)
+		}
+		// Auto-promote quadlet-shaped files: anything under
+		// /etc/containers/systemd/ with a recognized quadlet extension
+		// becomes a Quadlet rather than a plain File. The systemd-quadlet
+		// generator only scans this path, so detection by location is
+		// authoritative — a file at /etc/magus.d/foo.container is not a
+		// quadlet to systemd, and it shouldn't be one to magus either.
+		if isQuadletPath(f.Path) {
+			out.Quadlets = append(out.Quadlets, Quadlet{
+				Path:     f.Path,
+				Name:     filepath.Base(f.Path),
+				Mode:     f.Mode.value(0644),
+				UID:      f.User.ID.v,
+				GID:      f.Group.ID.v,
+				Contents: contents,
+			})
+			continue
 		}
 		out.Files = append(out.Files, File{
 			Path:     f.Path,

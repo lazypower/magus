@@ -36,6 +36,7 @@ const (
 	KindFile      Kind = "file"
 	KindDirectory Kind = "directory"
 	KindUnit      Kind = "unit"
+	KindQuadlet   Kind = "quadlet"
 )
 
 // ResourceAction is one row of the plan. Hashes and modes are populated when
@@ -103,12 +104,11 @@ func (d declaredResource) hash() string {
 	return HashContent(d.Contents, d.Kind)
 }
 
-// HashContent is the cross-package canonical hash. For units, it canonicalizes
-// before hashing so apply records the same hash diff would compute on the
-// next read. Exported so apply (and any future package) can use the same
-// equivalence rule.
+// HashContent is the cross-package canonical hash. Units and quadlets share
+// the same INI-shaped canonicalization (drop blanks/comments, normalize
+// equals spacing, preserve order); files hash raw bytes.
 func HashContent(b []byte, kind Kind) string {
-	if kind == KindUnit {
+	if kind == KindUnit || kind == KindQuadlet {
 		b = []byte(CanonicalizeUnit(string(b)))
 	}
 	return hashBytes(b)
@@ -177,6 +177,23 @@ func Compute(in *ir.IR, m *manifest.Manifest, fsys hostfs.Reader) (*Plan, error)
 	for _, d := range in.Directories {
 		declared[d.Path] = true
 		ra, err := diffDirectory(d, m, fsys)
+		if err != nil {
+			return nil, err
+		}
+		plan.Actions = append(plan.Actions, ra)
+	}
+
+	for _, q := range in.Quadlets {
+		declared[q.Path] = true
+		ra, err := diffDeclared(declaredResource{
+			Path:     q.Path,
+			Mode:     q.Mode,
+			UID:      q.UID,
+			GID:      q.GID,
+			Contents: q.Contents,
+			Kind:     KindQuadlet,
+			UnitName: q.Name,
+		}, m, fsys)
 		if err != nil {
 			return nil, err
 		}
@@ -321,6 +338,12 @@ func diffOrphan(path string, entry manifest.Resource, fsys hostfs.Reader) (Resou
 	if ra.Kind == KindUnit {
 		ra.UnitName = UnitNameFromPath(path)
 	}
+	if ra.Kind == KindQuadlet {
+		// For quadlets, UnitName is the source filename (e.g.,
+		// "ollama.container"). Apply uses it to compute the generated
+		// .service name for stop-before-unlink.
+		ra.UnitName = filepath.Base(path)
+	}
 
 	if entry.State == manifest.StateOrphaned {
 		ra.Action = ActionOrphaned
@@ -361,9 +384,32 @@ func kindFromManifest(k manifest.Kind) Kind {
 		return KindUnit
 	case manifest.KindDirectory:
 		return KindDirectory
+	case manifest.KindQuadlet:
+		return KindQuadlet
 	default:
 		return KindFile
 	}
+}
+
+// QuadletGeneratedService returns the .service name the systemd-quadlet
+// generator materializes from a quadlet source name. v1 supported types:
+//   foo.container → foo.service
+//   foo.volume    → foo-volume.service
+//   foo.network   → foo-network.service
+// Unsupported types return an empty string and a non-nil error so callers
+// can surface a clear message rather than guess.
+func QuadletGeneratedService(quadletName string) (string, error) {
+	ext := filepath.Ext(quadletName)
+	base := strings.TrimSuffix(quadletName, ext)
+	switch ext {
+	case ".container":
+		return base + ".service", nil
+	case ".volume":
+		return base + "-volume.service", nil
+	case ".network":
+		return base + "-network.service", nil
+	}
+	return "", fmt.Errorf("unsupported quadlet type: %s", ext)
 }
 
 // UnitPath is the on-disk location magus owns a unit body at.

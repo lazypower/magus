@@ -3,6 +3,7 @@ version: 1
 file_roots:
   - /etc/magus.d
   - /etc/systemd/system
+  - /etc/containers/systemd
   - /var/lib/magus
   - /var/data
 

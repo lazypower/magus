@@ -130,35 +130,63 @@ func Apply(plan *diff.Plan, in *ir.IR, w hostfs.Writer, m *manifest.Manifest, sd
 		return e
 	}
 
-	// Phase 1a: unit body deletes need disable-now before unlink. Drop-in
-	// deletes go through the standard path (just unlink + manifest cleanup).
-	for _, a := range plan.Actions {
-		if !isUnitBodyDelete(a) {
-			continue
+	quadletEvents := map[string]*unitEvents{}
+	getQuadletEvents := func(name string) *unitEvents {
+		if e, ok := quadletEvents[name]; ok {
+			return e
 		}
-		oc := applyUnitBodyDelete(a, w, m, sd)
-		r.Outcomes = append(r.Outcomes, oc)
-		if oc.Status == StatusApplied {
-			getEvents(a.UnitName).bodyDeleted = true
+		e := &unitEvents{}
+		quadletEvents[name] = e
+		return e
+	}
+
+	// Phase 1a: service-aware deletes. Unit body deletes need disable-now
+	// before unlink (so enablement symlinks are removed before the file
+	// vanishes). Quadlet deletes need the *generated* service stopped before
+	// the quadlet source disappears (otherwise systemd keeps the container
+	// running on the old spec).
+	for _, a := range plan.Actions {
+		switch {
+		case isUnitBodyDelete(a):
+			oc := applyUnitBodyDelete(a, w, m, sd)
+			r.Outcomes = append(r.Outcomes, oc)
+			if oc.Status == StatusApplied {
+				getEvents(a.UnitName).bodyDeleted = true
+			}
+		case isQuadletDelete(a):
+			oc := applyQuadletDelete(a, w, m, sd)
+			r.Outcomes = append(r.Outcomes, oc)
+			if oc.Status == StatusApplied {
+				getQuadletEvents(a.UnitName).bodyDeleted = true
+			}
 		}
 	}
 
-	// Phase 1b: everything else (files + drop-ins + unit body create/update/adopt + skip/conflict/orphan/cleanup)
+	// Phase 1b: everything else (files + drop-ins + unit/quadlet
+	// create/update/adopt + skip/conflict/orphan/cleanup).
 	for _, a := range plan.Actions {
-		if isUnitBodyDelete(a) {
+		if isUnitBodyDelete(a) || isQuadletDelete(a) {
 			continue // handled above
 		}
 		oc := applyOne(a, resources, w, m, now)
 		r.Outcomes = append(r.Outcomes, oc)
-		if a.Kind == diff.KindUnit && oc.Status == StatusApplied {
+		if oc.Status != StatusApplied {
+			continue
+		}
+		switch a.Kind {
+		case diff.KindUnit:
 			ev := getEvents(a.UnitName)
 			isBody := filepath.Base(a.Path) == a.UnitName
 			recordUnitEvent(ev, a.Action, isBody)
+		case diff.KindQuadlet:
+			recordUnitEvent(getQuadletEvents(a.UnitName), a.Action, true)
 		}
 	}
 
-	// Phase 2: daemon-reload if any unit file was mutated.
-	if anyUnitMutation(events) {
+	// Phase 2: daemon-reload if any unit OR quadlet file was mutated. The
+	// quadlet generator runs at daemon-reload time, so quadlet writes have
+	// the same trigger.
+	if anyUnitMutation(events) || anyUnitMutation(quadletEvents) {
 		err := sd.DaemonReload()
 		oc := Outcome{Path: "daemon-reload", Action: diff.ActionUpdate}
 		if err != nil {
@@ -170,14 +198,36 @@ func Apply(plan *diff.Plan, in *ir.IR, w hostfs.Writer, m *manifest.Manifest, sd
 		r.Outcomes = append(r.Outcomes, oc)
 	}
 
-	// Phase 3: per-IR-unit state reconciliation. Walks IR.Units (deleted
+	// Phase 3a: per-IR-unit state reconciliation. Walks IR.Units (deleted
 	// units are not in the IR, so they're not visited here).
 	for _, u := range in.Units {
 		ev := events[u.Name]
 		if ev == nil {
 			ev = &unitEvents{}
 		}
-		outcomes := reconcileUnitState(u, ev, sd)
+		outcomes := reconcileServiceState(u.Name, u.Enabled, ev, sd)
+		r.Outcomes = append(r.Outcomes, outcomes...)
+	}
+
+	// Phase 3b: per-IR-quadlet state reconciliation. The .container file is
+	// the quadlet source; magus drives the *generated* .service. Quadlets
+	// always reconcile to enabled (the .container format expresses "this
+	// thing should be running") — the operator opts out by removing the
+	// declaration entirely, not via a flag.
+	for _, q := range in.Quadlets {
+		svc, err := diff.QuadletGeneratedService(q.Name)
+		if err != nil {
+			r.Outcomes = append(r.Outcomes, Outcome{
+				Path: q.Path, Action: diff.ActionUpdate,
+				Status: StatusErrored, Err: err,
+			})
+			continue
+		}
+		ev := quadletEvents[q.Name]
+		if ev == nil {
+			ev = &unitEvents{}
+		}
+		outcomes := reconcileServiceState(svc, true, ev, sd)
 		r.Outcomes = append(r.Outcomes, outcomes...)
 	}
 
@@ -225,6 +275,16 @@ func indexResources(in *ir.IR) map[string]pendingResource {
 			Kind: manifest.KindDirectory,
 		}
 	}
+	for _, q := range in.Quadlets {
+		out[q.Path] = pendingResource{
+			Path:     q.Path,
+			Mode:     q.Mode,
+			UID:      q.UID,
+			GID:      q.GID,
+			Contents: q.Contents,
+			Kind:     manifest.KindQuadlet,
+		}
+	}
 	return out
 }
 
@@ -236,6 +296,13 @@ func isUnitBodyDelete(a diff.ResourceAction) bool {
 		return false
 	}
 	return filepath.Base(a.Path) == a.UnitName
+}
+
+// isQuadletDelete reports whether a is a quadlet source-file delete. Quadlet
+// deletes need the *generated* service stopped before the source vanishes —
+// otherwise systemd keeps running the old container until next boot.
+func isQuadletDelete(a diff.ResourceAction) bool {
+	return a.Kind == diff.KindQuadlet && a.Action == diff.ActionDelete
 }
 
 // applyUnitBodyDelete runs disable --now then unlinks the unit body file.
@@ -256,6 +323,33 @@ func applyUnitBodyDelete(a diff.ResourceAction, w hostfs.Writer, m *manifest.Man
 	m.Delete(a.Path)
 	oc.Status = StatusApplied
 	oc.Reason = "disabled, stopped, removed"
+	return oc
+}
+
+// applyQuadletDelete stops the generated service, then unlinks the quadlet
+// source. Daemon-reload runs later in the batched phase 2 — that's what
+// causes the generator to drop the now-orphaned .service from systemd's view.
+func applyQuadletDelete(a diff.ResourceAction, w hostfs.Writer, m *manifest.Manifest, sd systemd.Manager) Outcome {
+	oc := Outcome{Path: a.Path, Action: a.Action}
+	svc, err := diff.QuadletGeneratedService(a.UnitName)
+	if err != nil {
+		oc.Status = StatusErrored
+		oc.Err = err
+		return oc
+	}
+	if err := sd.DisableNow(svc); err != nil {
+		oc.Status = StatusErrored
+		oc.Err = fmt.Errorf("disable --now %s: %w", svc, err)
+		return oc
+	}
+	if err := w.Remove(a.Path); err != nil {
+		oc.Status = StatusErrored
+		oc.Err = err
+		return oc
+	}
+	m.Delete(a.Path)
+	oc.Status = StatusApplied
+	oc.Reason = fmt.Sprintf("stopped %s, removed source", svc)
 	return oc
 }
 
@@ -483,52 +577,56 @@ func anyUnitMutation(events map[string]*unitEvents) bool {
 	return false
 }
 
-// reconcileUnitState drives systemd state for one IR unit after files +
-// daemon-reload have settled. Returns one outcome per systemctl operation
-// performed (so the apply output mirrors the spec example's per-line format).
-func reconcileUnitState(u ir.Unit, ev *unitEvents, sd systemd.Manager) []Outcome {
+// reconcileServiceState drives systemd state for one service (a unit's name
+// or a quadlet's *generated* .service name) after files + daemon-reload have
+// settled. Returns one outcome per systemctl operation performed.
+//
+// The same logic governs both units and quadlets — the only difference is
+// the service name a caller passes in, and the desiredEnabled flag (units
+// honor the IR's Enabled field; quadlets always pass true since the .container
+// format expresses always-on intent).
+func reconcileServiceState(serviceName string, desiredEnabled bool, ev *unitEvents, sd systemd.Manager) []Outcome {
 	if ev.bodyDeleted {
-		// Disable+stop already happened in phase 1; nothing more to do.
+		// Stop+disable already happened in phase 1; nothing more to do.
 		return nil
 	}
 	var outcomes []Outcome
 
-	// Newly-created units: combine enable + start if declared enabled.
-	// Disabled-on-create units are written but not started.
+	// Newly-created service: combine enable + start if desired enabled.
 	if ev.bodyCreated {
-		if u.Enabled {
-			err := sd.EnableNow(u.Name)
-			outcomes = append(outcomes, unitOutcome(u.Name, "enable --now", err))
+		if desiredEnabled {
+			err := sd.EnableNow(serviceName)
+			outcomes = append(outcomes, unitOutcome(serviceName, "enable --now", err))
 		}
 		return outcomes
 	}
 
-	// Existing unit (not newly created): reconcile enablement every apply.
-	current, err := sd.IsEnabled(u.Name)
+	// Existing service: reconcile enablement every apply.
+	current, err := sd.IsEnabled(serviceName)
 	if err != nil {
-		outcomes = append(outcomes, unitOutcome(u.Name, "is-enabled", err))
+		outcomes = append(outcomes, unitOutcome(serviceName, "is-enabled", err))
 	} else {
 		switch {
-		case u.Enabled && (current == systemd.EnablementDisabled || current == systemd.EnablementUnknown):
-			err := sd.Enable(u.Name)
-			outcomes = append(outcomes, unitOutcome(u.Name, "enable", err))
-		case !u.Enabled && current == systemd.EnablementEnabled:
-			err := sd.Disable(u.Name)
-			outcomes = append(outcomes, unitOutcome(u.Name, "disable", err))
+		case desiredEnabled && (current == systemd.EnablementDisabled || current == systemd.EnablementUnknown):
+			err := sd.Enable(serviceName)
+			outcomes = append(outcomes, unitOutcome(serviceName, "enable", err))
+		case !desiredEnabled && current == systemd.EnablementEnabled:
+			err := sd.Disable(serviceName)
+			outcomes = append(outcomes, unitOutcome(serviceName, "disable", err))
 		}
 	}
 
 	// Restart-if-active for content changes (excludes adopts and skips).
-	// Inactive units whose content changed are rewritten only — the new
+	// Inactive services whose content changed are rewritten only — the new
 	// content takes effect on next start. Logged for visibility.
 	if ev.hasContentMut {
-		active, _ := sd.IsActive(u.Name)
+		active, _ := sd.IsActive(serviceName)
 		if active {
-			err := sd.Restart(u.Name)
-			outcomes = append(outcomes, unitOutcome(u.Name, "restart", err))
+			err := sd.Restart(serviceName)
+			outcomes = append(outcomes, unitOutcome(serviceName, "restart", err))
 		} else {
 			outcomes = append(outcomes, Outcome{
-				Path:   u.Name,
+				Path:   serviceName,
 				Action: diff.ActionUpdate,
 				Status: StatusApplied,
 				Reason: "content updated, inactive — change takes effect on next start",
