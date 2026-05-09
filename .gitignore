@@ -5,3 +5,7 @@ magus.ign
 # Magus reconciler binary
 /magus
 /cmd/magus/magus
+
+# Claude Code local state (per-machine; shared settings.json is checked in)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
