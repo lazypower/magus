@@ -1,3 +1,15 @@
+# --- Stage 1: cross-compile the magus reconciler ---
+# Static linux/amd64 binary, stripped, no toolchain in the final image.
+FROM docker.io/library/golang:1.26.2 AS magus-builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/magus ./cmd/magus
+COPY internal ./internal
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" -o /out/magus ./cmd/magus
+
+# --- Stage 2: bootc OS image ---
 FROM quay.io/fedora/fedora-coreos:stable
 
 # System packages — GPU stack, firmware, brew deps
@@ -59,6 +71,12 @@ COPY config/systemd/bootc-fetch-apply-updates.timer.d/schedule.conf \
 # Quadlet container service definitions
 COPY config/quadlets/ollama.container    /usr/share/containers/systemd/ollama.container
 COPY config/quadlets/vllm.container      /usr/share/containers/systemd/vllm.container
+
+# Magus reconciler — binary plus default policy. The binary lives in /usr/bin
+# (image-baked, immutable on the running host); operators supply their day-2
+# Butane file at runtime.
+COPY --from=magus-builder /out/magus      /usr/bin/magus
+COPY config/policy.example.yaml           /etc/magus/policy.yaml
 
 # Validate bootc image structure
 RUN bootc container lint
