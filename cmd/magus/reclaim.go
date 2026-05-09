@@ -17,7 +17,9 @@ import (
 
 const reclaimUsage = `magus reclaim — restore an orphaned path to active reconciliation
 
-Usage: magus reclaim [--yes] [--force] [--policy <path>] [--manifest <path>] <butane-file> <path>
+Usage: magus reclaim [--yes] [--force] [--policy <path>] [--manifest <path>] <butane-source> <path>
+
+<butane-source> is either a local filesystem path or an http(s) URL.
 
 Reclaim transitions an orphaned manifest entry back to active state. The IR
 must declare the path; the policy must currently permit it; the path must

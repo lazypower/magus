@@ -9,9 +9,12 @@ import (
 	"github.com/lazypower/magus/internal/policy"
 )
 
-const validateUsage = `magus validate — parse a Butane file and check it against the policy
+const validateUsage = `magus validate — parse a Butane source and check it against the policy
 
-Usage: magus validate [--policy <path>] <butane-file>
+Usage: magus validate [--policy <path>] <butane-source>
+
+<butane-source> is either a local filesystem path or an http(s) URL.
+URLs are fetched on every invocation; no caching.
 
 Flags:
   --policy <path>   Override the policy file location

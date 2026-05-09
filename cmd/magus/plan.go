@@ -15,7 +15,9 @@ import (
 
 const planUsage = `magus plan — show what apply would do
 
-Usage: magus plan [--policy <path>] [--manifest <path>] <butane-file>
+Usage: magus plan [--policy <path>] [--manifest <path>] <butane-source>
+
+<butane-source> is either a local filesystem path or an http(s) URL.
 
 Flags:
   --policy <path>     Override policy file (default: /etc/magus/policy.yaml)

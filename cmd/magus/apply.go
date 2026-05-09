@@ -20,7 +20,10 @@ import (
 
 const applyUsage = `magus apply — reconcile the system toward the declared state
 
-Usage: magus apply [--yes] [--policy <path>] [--manifest <path>] <butane-file>
+Usage: magus apply [--yes] [--policy <path>] [--manifest <path>] <butane-source>
+
+<butane-source> is either a local filesystem path or an http(s) URL.
+URLs are fetched on every apply — no caching, no fallback to a prior copy.
 
 Flags:
   --yes               Skip the confirmation prompt

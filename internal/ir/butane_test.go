@@ -1,8 +1,11 @@
 package ir
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,5 +106,68 @@ func TestDecodeSourceVariants(t *testing.T) {
 func TestDecodeSourceRejectsRemote(t *testing.T) {
 	if _, err := decodeSource("https://example.com/foo"); err == nil {
 		t.Error("decodeSource: want error on https, got nil")
+	}
+}
+
+func TestLoadButaneHTTP(t *testing.T) {
+	// Serve a known-good Butane file and load it via URL. Verifies the full
+	// HTTP path including translation and IR extraction.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(minimalButane))
+	}))
+	defer srv.Close()
+
+	got, _, err := LoadButane(srv.URL + "/magus.bu")
+	if err != nil {
+		t.Fatalf("LoadButane: %v", err)
+	}
+	if len(got.Files) != 1 {
+		t.Errorf("Files: want 1, got %d", len(got.Files))
+	}
+}
+
+func TestLoadButaneHTTPNon200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not here", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	if _, _, err := LoadButane(srv.URL + "/missing.bu"); err == nil {
+		t.Error("LoadButane: want error on HTTP 404, got nil")
+	}
+}
+
+func TestLoadButaneHTTPSizeCap(t *testing.T) {
+	// Serve a body just over the cap. fetchButaneHTTP must refuse rather
+	// than silently truncate to a partial Butane file.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(strings.Repeat("x", maxButaneSize+1024)))
+	}))
+	defer srv.Close()
+
+	_, _, err := LoadButane(srv.URL)
+	if err == nil {
+		t.Fatal("LoadButane: want size-cap error, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("error message should mention size cap, got: %v", err)
+	}
+}
+
+func TestIsHTTPURL(t *testing.T) {
+	cases := map[string]bool{
+		"https://example.com/foo.bu": true,
+		"http://example.com/foo.bu":  true,
+		"/etc/magus/magus.bu":        false,
+		"./magus.bu":                 false,
+		"file:///tmp/foo.bu":         false, // file:// not a thing in v1
+		"":                           false,
+	}
+	for in, want := range cases {
+		if got := isHTTPURL(in); got != want {
+			t.Errorf("isHTTPURL(%q) = %v, want %v", in, got, want)
+		}
 	}
 }

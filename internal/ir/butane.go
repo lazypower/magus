@@ -4,15 +4,67 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	butane "github.com/coreos/butane/config"
 	"github.com/coreos/butane/config/common"
 	"github.com/coreos/vcontext/report"
 )
+
+// maxButaneSize caps fetched Butane bodies at 10 MB. A magus Butane file is
+// typically a few KB to low-tens-of-KB; 10 MB is a runaway-upstream guard,
+// not a soft target. Past this we stop reading and surface an error rather
+// than blow up memory on a wrong URL pointing at a binary download.
+const maxButaneSize = 10 * 1024 * 1024
+
+// fetchTimeout bounds HTTP reads. Picked so a slow link doesn't stall apply
+// indefinitely, but long enough that a transient blip doesn't kill a real run.
+const fetchTimeout = 30 * time.Second
+
+// readButaneSource dispatches on source scheme: local file otherwise.
+func readButaneSource(source string) ([]byte, error) {
+	if isHTTPURL(source) {
+		return fetchButaneHTTP(source)
+	}
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return nil, fmt.Errorf("read butane: %w", err)
+	}
+	return data, nil
+}
+
+func isHTTPURL(s string) bool {
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+}
+
+func fetchButaneHTTP(rawurl string) ([]byte, error) {
+	client := &http.Client{Timeout: fetchTimeout}
+	resp, err := client.Get(rawurl)
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s: %w", rawurl, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetch %s: HTTP %d %s", rawurl, resp.StatusCode, resp.Status)
+	}
+	// LimitReader+1 trick: read one byte past the cap so we can detect when
+	// the upstream had more to give and surface a clear error rather than
+	// silently truncating.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxButaneSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s: read body: %w", rawurl, err)
+	}
+	if int64(len(body)) > maxButaneSize {
+		return nil, fmt.Errorf("fetch %s: body exceeds %d bytes — refusing to read further", rawurl, maxButaneSize)
+	}
+	return body, nil
+}
 
 // quadletRoot is the canonical search path the systemd-quadlet generator
 // uses for operator-supplied quadlets. /usr/share/containers/systemd is the
@@ -37,21 +89,25 @@ func isQuadletPath(path string) bool {
 	return false
 }
 
-// LoadButane reads path, runs the Butane → Ignition translation, and extracts
-// the magus IR subset from the resulting Ignition spec.
+// LoadButane reads source, runs the Butane → Ignition translation, and
+// extracts the magus IR subset from the resulting Ignition spec.
 //
-// path is the .bu file. Translation warnings (non-fatal) are returned in
-// warnings; translation errors are returned as the error. Both are reported
-// up to the caller so validate can surface parse-level issues distinctly from
-// policy violations.
-func LoadButane(path string) (*IR, []string, error) {
-	data, err := os.ReadFile(path)
+// source may be a local filesystem path or an http(s) URL. URLs are fetched
+// on every call — there is no local cache and no fallback to a last-known-good
+// IR. The reconciler-pattern guarantee is "what apply runs against is what
+// the operator currently declared," and silently applying a cached copy
+// after a fetch failure would break that.
+//
+// Translation warnings (non-fatal) are returned in warnings; translation
+// errors are returned as the error.
+func LoadButane(source string) (*IR, []string, error) {
+	data, err := readButaneSource(source)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read butane: %w", err)
+		return nil, nil, err
 	}
 	ignBytes, report, err := butane.TranslateBytes(data, common.TranslateBytesOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("translate butane %s: %w", path, err)
+		return nil, nil, fmt.Errorf("translate butane %s: %w", source, err)
 	}
 	warnings := collectWarnings(report)
 

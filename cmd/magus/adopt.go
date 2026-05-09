@@ -19,7 +19,9 @@ import (
 
 const adoptUsage = `magus adopt — take over an existing path that differs from the IR
 
-Usage: magus adopt [--yes] [--policy <path>] [--manifest <path>] <butane-file> <path>
+Usage: magus adopt [--yes] [--policy <path>] [--manifest <path>] <butane-source> <path>
+
+<butane-source> is either a local filesystem path or an http(s) URL.
 
 Adopt overwrites the existing content with the IR's content and records the
 path in the manifest with origin=force-adopt. Use this when you want magus to
