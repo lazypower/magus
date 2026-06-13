@@ -18,6 +18,9 @@ GroupAdd=render
 # Enable Vulkan GPU acceleration
 Environment=OLLAMA_VULKAN=1
 
+# Keep models resident for 1h to avoid per-request load tax
+Environment=OLLAMA_KEEP_ALIVE=1h
+
 # Model storage on secondary NVMe
 Volume=/var/data/ollama:/root/.ollama:Z
 
