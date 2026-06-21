@@ -6,5 +6,16 @@ jobs:
   test:
     runs-on: golang
     steps:
-      - uses: actions/checkout@v4
-      - run: go test ./...
+      - name: Checkout
+        # The golang runner has no node, so actions/checkout@v4 (a JS action)
+        # can't run. Clone manually with git (present in the base image),
+        # authenticating with the job token so private repos work too.
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          host="${GITHUB_SERVER_URL#https://}"
+          git clone "https://token:${TOKEN}@${host}/${GITHUB_REPOSITORY}.git" src
+          git -C src checkout "$GITHUB_SHA"
+      - name: Test
+        working-directory: src
+        run: go test ./...
