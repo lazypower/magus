@@ -1,6 +1,8 @@
 package ir
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -119,7 +121,7 @@ func LoadButane(source string) (*IR, []string, error) {
 	out := &IR{}
 
 	for _, f := range ign.Storage.Files {
-		contents, err := decodeSource(f.Contents.Source)
+		contents, err := decodeSource(f.Contents.Source, f.Contents.Compression)
 		if err != nil {
 			return nil, warnings, fmt.Errorf("file %s: %w", f.Path, err)
 		}
@@ -207,7 +209,8 @@ type ignFile struct {
 	User     ignNodeOwner `json:"user"`
 	Group    ignNodeOwner `json:"group"`
 	Contents struct {
-		Source string `json:"source"`
+		Source      string `json:"source"`
+		Compression string `json:"compression"`
 	} `json:"contents"`
 }
 
@@ -278,7 +281,11 @@ func derefString(s *string) string {
 // supports the inline forms — data: URLs, both percent-encoded and base64.
 // Remote sources (http, https, s3, etc.) are not supported in the IR; magus
 // reconciles content it can resolve at parse time.
-func decodeSource(src string) ([]byte, error) {
+//
+// compression is the Ignition contents.compression field. Butane's translator
+// auto-gzips file payloads, so a missing decompress step writes gzipped bytes
+// to disk. Empty and "gzip" are accepted; anything else is an error.
+func decodeSource(src, compression string) ([]byte, error) {
 	if src == "" {
 		return nil, nil
 	}
@@ -298,14 +305,33 @@ func decodeSource(src string) ([]byte, error) {
 			break
 		}
 	}
+	var raw []byte
 	if isBase64 {
-		return base64.StdEncoding.DecodeString(payload)
+		decoded, err := base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return nil, err
+		}
+		raw = decoded
+	} else {
+		decoded, err := url.QueryUnescape(payload)
+		if err != nil {
+			return nil, fmt.Errorf("contents.source: %w", err)
+		}
+		raw = []byte(decoded)
 	}
-	decoded, err := url.QueryUnescape(payload)
-	if err != nil {
-		return nil, fmt.Errorf("contents.source: %w", err)
+	switch compression {
+	case "":
+		return raw, nil
+	case "gzip":
+		zr, err := gzip.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			return nil, fmt.Errorf("contents.compression=gzip: %w", err)
+		}
+		defer zr.Close()
+		return io.ReadAll(zr)
+	default:
+		return nil, fmt.Errorf("contents.compression: unsupported %q", compression)
 	}
-	return []byte(decoded), nil
 }
 
 func schemeOf(s string) string {

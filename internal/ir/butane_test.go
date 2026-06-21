@@ -81,31 +81,41 @@ func TestLoadButaneMinimal(t *testing.T) {
 
 func TestDecodeSourceVariants(t *testing.T) {
 	cases := []struct {
-		name string
-		in   string
-		want string
+		name        string
+		in          string
+		compression string
+		want        string
 	}{
-		{"plain", "data:,hello%20world", "hello world"},
-		{"base64", "data:;base64,aGVsbG8=", "hello"},
-		{"with-mediatype", "data:text/plain;charset=utf-8;base64,aGVsbG8=", "hello"},
-		{"empty", "", ""},
+		{"plain", "data:,hello%20world", "", "hello world"},
+		{"base64", "data:;base64,aGVsbG8=", "", "hello"},
+		{"with-mediatype", "data:text/plain;charset=utf-8;base64,aGVsbG8=", "", "hello"},
+		{"empty", "", "", ""},
+		// "hello" gzipped, then base64'd. Matches what Butane emits for
+		// auto-compressed inline payloads.
+		{"gzip-base64", "data:;base64,H4sIAAAAAAAAA8tIzcnJBwCGphA2BQAAAA==", "gzip", "hello"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := decodeSource(c.in)
+			got, err := decodeSource(c.in, c.compression)
 			if err != nil {
-				t.Fatalf("decodeSource(%q): %v", c.in, err)
+				t.Fatalf("decodeSource(%q, %q): %v", c.in, c.compression, err)
 			}
 			if string(got) != c.want {
-				t.Errorf("decodeSource(%q) = %q, want %q", c.in, got, c.want)
+				t.Errorf("decodeSource(%q, %q) = %q, want %q", c.in, c.compression, got, c.want)
 			}
 		})
 	}
 }
 
 func TestDecodeSourceRejectsRemote(t *testing.T) {
-	if _, err := decodeSource("https://example.com/foo"); err == nil {
+	if _, err := decodeSource("https://example.com/foo", ""); err == nil {
 		t.Error("decodeSource: want error on https, got nil")
+	}
+}
+
+func TestDecodeSourceRejectsUnknownCompression(t *testing.T) {
+	if _, err := decodeSource("data:,hi", "zstd"); err == nil {
+		t.Error("decodeSource: want error on unsupported compression, got nil")
 	}
 }
 
