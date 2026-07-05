@@ -1,11 +1,16 @@
-# --- Stage 1: cross-compile the magus reconciler ---
-# Static linux/amd64 binary, stripped, no toolchain in the final image.
+# --- Stage 1: build the magus reconciler from lab/magus-cli ---
+# magus lives in its own repo now. Build it in-tree from the GitHub mirror:
+# the module's declared path is gitea-internal (RFC1918, unreachable from the
+# GitHub build runners), but an in-tree build only needs the source, so the
+# path mismatch is irrelevant. Pin to a commit for reproducible images and
+# bump deliberately. Static linux/amd64 binary, stripped, no toolchain in the
+# final image.
 FROM docker.io/library/golang:1.26.2 AS magus-builder
+ARG MAGUS_CLI_REPO=https://github.com/lazypower/magus-cli
+ARG MAGUS_CLI_REF=588bbe090a0ccecf0bb16ba55ae2b2cc437031a7
+RUN git clone "${MAGUS_CLI_REPO}" /src \
+    && git -C /src checkout "${MAGUS_CLI_REF}"
 WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY cmd/magus ./cmd/magus
-COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags="-s -w" -o /out/magus ./cmd/magus
 
