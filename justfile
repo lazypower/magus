@@ -69,23 +69,6 @@ push-vllm: vllm
 # Push everything
 push-all: push push-ollama push-llama-cpp push-vllm
 
-# --- Magus reconciler ---
-
-# Build the magus reconciler binary locally (linux/amd64, static, stripped).
-# The Containerfile's Go build stage produces the same binary for the image;
-# this target is for dev-machine smoke tests and direct deploys via scp.
-magus-build:
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-        go build -ldflags="-s -w" -o magus ./cmd/magus
-
-# Run the magus reconciler test suite
-magus-test:
-    go test ./...
-
-# Vet the magus reconciler source
-magus-vet:
-    go vet ./...
-
 # --- Utilities ---
 
 # Run hadolint on the Containerfile
@@ -99,4 +82,4 @@ ignition:
 
 # Remove generated files
 clean:
-    rm -f ignition.json magus
+    rm -f ignition.json
