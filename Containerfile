@@ -7,6 +7,7 @@
 # final image.
 FROM docker.io/library/golang:1.26.2 AS magus-builder
 ARG MAGUS_CLI_REPO=https://github.com/lazypower/magus-cli
+# renovate: datasource=github-commits depName=lazypower/magus-cli branch=main
 ARG MAGUS_CLI_REF=588bbe090a0ccecf0bb16ba55ae2b2cc437031a7
 RUN git clone "${MAGUS_CLI_REPO}" /src \
     && git -C /src checkout "${MAGUS_CLI_REF}"
