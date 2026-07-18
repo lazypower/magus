@@ -1,0 +1,28 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard"
+  ],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Never automerge without the image build gate passing. Renovate holds automerge until all branch checks are green (ignoreTests defaults to false); this makes that explicit and opt-in per-manager below.",
+      "matchManagers": ["dockerfile", "regex", "custom.regex"],
+      "automerge": false
+    },
+    {
+      "description": "OS base image tags (fedora-bootc / fedora-minimal / golang): allow minor+patch, but a major is a distro/toolchain jump — hold for a human. v45 = rawhide, which is why this exists.",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "automerge": false
+    },
+    {
+      "description": "ollama is 0.x: every minor can rework the build (v0.32 dropped the CPU/Vulkan CMake presets). Treat minor+major as breaking — build must pass and a human must merge.",
+      "matchPackageNames": ["ollama/ollama"],
+      "matchUpdateTypes": ["minor", "major"],
+      "automerge": false
+    }
+  ]
+}

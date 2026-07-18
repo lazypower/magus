@@ -6,10 +6,12 @@
 #
 # Adapted from CobaltRush: github.com/lazypower/CobaltRush
 
-FROM quay.io/fedora/fedora-bootc:45 AS builder
+FROM quay.io/fedora/fedora-bootc:43 AS builder
 
 # renovate: datasource=github-releases depName=ollama/ollama
-ARG OLLAMA_VERSION=v0.32.1
+# Held at v0.21.2: v0.32.x reworked CMakePresets.json and dropped the CPU/Vulkan
+# presets this build drives. Bumping needs the build ported, not a version flip.
+ARG OLLAMA_VERSION=v0.21.2
 
 RUN --mount=type=cache,target=/var/cache/libdnf5 \
     dnf install -y \

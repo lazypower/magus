@@ -1,6 +1,6 @@
 ## Build llama.cpp with Vulkan + cooperative matrix (RDNA 3.5 WMMA)
 
-FROM quay.io/fedora/fedora-bootc:45 AS builder
+FROM quay.io/fedora/fedora-bootc:43 AS builder
 
 # Coopmat requires a GPU at build time — OFF for headless CI, ON for local builds
 ARG COOPMAT=OFF
