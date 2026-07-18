@@ -5,7 +5,7 @@
 # path mismatch is irrelevant. Pin to a commit for reproducible images and
 # bump deliberately. Static linux/amd64 binary, stripped, no toolchain in the
 # final image.
-FROM docker.io/library/golang:1.26.2 AS magus-builder
+FROM docker.io/library/golang:1.26.5 AS magus-builder
 ARG MAGUS_CLI_REPO=https://github.com/lazypower/magus-cli
 # renovate: datasource=github-commits depName=lazypower/magus-cli branch=main
 ARG MAGUS_CLI_REF=588bbe090a0ccecf0bb16ba55ae2b2cc437031a7
