@@ -58,7 +58,7 @@ RUN mkdir -p /out/bin && \
 
 
 ## Runtime image — minimal, just the binary + Vulkan libs
-FROM registry.fedoraproject.org/fedora-minimal:43
+FROM registry.fedoraproject.org/fedora-minimal:45
 
 RUN microdnf install -y \
         mesa-vulkan-drivers \
