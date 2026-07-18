@@ -9,7 +9,7 @@
 FROM quay.io/fedora/fedora-bootc:43 AS builder
 
 # renovate: datasource=github-releases depName=ollama/ollama
-ARG OLLAMA_VERSION=v0.21.2
+ARG OLLAMA_VERSION=v0.32.1
 
 RUN --mount=type=cache,target=/var/cache/libdnf5 \
     dnf install -y \
