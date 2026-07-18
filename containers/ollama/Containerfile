@@ -6,7 +6,7 @@
 #
 # Adapted from CobaltRush: github.com/lazypower/CobaltRush
 
-FROM quay.io/fedora/fedora-bootc:43 AS builder
+FROM quay.io/fedora/fedora-bootc:44 AS builder
 
 # renovate: datasource=github-releases depName=ollama/ollama
 # Held at v0.21.2: v0.32.x reworked CMakePresets.json and dropped the CPU/Vulkan
