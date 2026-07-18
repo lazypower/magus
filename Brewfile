@@ -8,3 +8,7 @@ brew "eza"
 brew "jq"
 brew "yq"
 brew "starship"
+
+# LLM workflow tools
+tap "lazypower/tap"
+brew "lazypower/tap/spark-tools"
