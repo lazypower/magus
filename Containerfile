@@ -1,19 +1,34 @@
-# --- Stage 1: build the magus reconciler from lab/magus-cli ---
-# magus lives in its own repo now. Build it in-tree from the GitHub mirror:
-# the module's declared path is gitea-internal (RFC1918, unreachable from the
-# GitHub build runners), but an in-tree build only needs the source, so the
-# path mismatch is irrelevant. Pin to a commit for reproducible images and
-# bump deliberately. Static linux/amd64 binary, stripped, no toolchain in the
-# final image.
-FROM docker.io/library/golang:1.26.5 AS magus-builder
+# --- Stage 1: build the baked management agents ---
+# Two Go binaries the substrate carries: magus (workload reconciler) and labmap
+# (host discovery). Both live in their own repos and build in-tree from their
+# GitHub canonical remotes — each module's declared path is gitea-internal
+# (RFC1918, unreachable from the GitHub build runners), but an in-tree build
+# only needs the source, so the path mismatch is irrelevant. Pin each to a
+# commit for reproducible images and bump deliberately. Static linux/amd64
+# binaries, stripped, no toolchain in the final image.
+FROM docker.io/library/golang:1.26.5 AS agents
+
 ARG MAGUS_CLI_REPO=https://github.com/lazypower/magus-cli
 # renovate: datasource=github-commits depName=lazypower/magus-cli branch=main
-ARG MAGUS_CLI_REF=3f07fbf843598ae9250aa2ea26c6445e2590232b
-RUN git clone "${MAGUS_CLI_REPO}" /src \
-    && git -C /src checkout "${MAGUS_CLI_REF}"
-WORKDIR /src
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w" -o /out/magus ./cmd/magus
+ARG MAGUS_CLI_REF=cb709a38bd2dfb6554769981a8ba2f6c02e25d33
+RUN git clone "${MAGUS_CLI_REPO}" /src/magus \
+    && git -C /src/magus checkout "${MAGUS_CLI_REF}" \
+    && cd /src/magus \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+       go build -ldflags="-s -w" -o /out/magus ./cmd/magus
+
+# labmap — host discovery agent. LLM-focused magus bakes it (chosen over a day-2
+# container: `labmap serve` is a host agent, cleaner as a native binary than a
+# socket-mounted container). Substrate-owned: the fleet policy deny-lists
+# labmap-agent.* so magus never manages it as a workload.
+ARG LABMAP_REPO=https://github.com/lazypower/labmap
+# renovate: datasource=github-commits depName=lazypower/labmap branch=main
+ARG LABMAP_REF=294d4aecb2219be808ce1d4908024b0a566b0c1e
+RUN git clone "${LABMAP_REPO}" /src/labmap \
+    && git -C /src/labmap checkout "${LABMAP_REF}" \
+    && cd /src/labmap \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+       go build -ldflags="-s -w" -o /out/labmap .
 
 # --- Stage 2: bootc OS image ---
 FROM quay.io/fedora/fedora-coreos:stable
@@ -78,11 +93,33 @@ COPY config/systemd/bootc-fetch-apply-updates.timer.d/schedule.conf \
 COPY config/quadlets/ollama.container    /usr/share/containers/systemd/ollama.container
 COPY config/quadlets/vllm.container      /usr/share/containers/systemd/vllm.container
 
-# Magus reconciler — binary plus default policy. The binary lives in /usr/bin
-# (image-baked, immutable on the running host); operators supply their day-2
-# Butane file at runtime.
-COPY --from=magus-builder /out/magus      /usr/bin/magus
-COPY config/policy.example.yaml           /etc/magus/policy.yaml
+# Management agents — baked, immutable. /usr/bin because this is a golden image.
+# magus is the workload reconciler; labmap is the host discovery agent.
+COPY --from=agents /out/magus  /usr/bin/magus
+COPY --from=agents /out/labmap /usr/bin/labmap
+
+# labmap host agent — `labmap serve` on :9999. Substrate-owned, NOT a magus
+# workload (the fleet policy deny-lists labmap-agent.*). An optional persisted
+# agent API key arrives at install via /etc/core/labmap.env — never baked.
+COPY config/systemd/labmap-agent.service /usr/lib/systemd/system/labmap-agent.service
+
+# core-reconcile layer — the workload GitOps loop. This host is a core-fleet
+# member: core-reconcile pulls hosts/magus/workload.bu from core-fleet and runs
+# `magus apply` on a timer. Infra specifics stay out of the image — the fleet
+# repo pointer arrives at install via Ignition (/etc/core/reconcile.env), never
+# baked here.
+#
+# policy.yaml is the magus authority's FAIL-CLOSED FALLBACK only. The live
+# authority (fleet default + per-host overrides) lives in core-fleet, resolved
+# per-host by core-reconcile; this baked copy is used solely when a host can't
+# yet reach the fleet. Keep its rules in lockstep with core-fleet's root
+# policy.yaml (bump both together).
+COPY config/magus/policy.yaml             /etc/magus/policy.yaml
+COPY config/scripts/core-reconcile.sh     /usr/libexec/core-reconcile
+COPY config/systemd/core-reconcile.service /usr/lib/systemd/system/core-reconcile.service
+COPY config/systemd/core-reconcile.timer   /usr/lib/systemd/system/core-reconcile.timer
+RUN chmod 0755 /usr/libexec/core-reconcile \
+    && systemctl enable core-reconcile.timer labmap-agent.service
 
 # Validate bootc image structure
 RUN bootc container lint

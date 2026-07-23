@@ -1,0 +1,8 @@
+[Unit]
+Description=core — converge workload layer from core-fleet (git pull + magus apply)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/core-reconcile

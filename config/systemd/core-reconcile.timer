@@ -1,0 +1,10 @@
+[Unit]
+Description=core — periodic workload reconcile
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+RandomizedDelaySec=1min
+
+[Install]
+WantedBy=timers.target
