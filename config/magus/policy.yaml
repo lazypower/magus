@@ -1,0 +1,39 @@
+version: 1
+
+# FAIL-CLOSED FALLBACK — the live magus policy authority is core-fleet
+# (fleet-default policy.yaml + optional per-host overrides), resolved per-host by
+# core-reconcile. This baked copy is used ONLY when a host can't reach the fleet
+# yet. Keep its rules in lockstep with core-fleet's root policy.yaml.
+#
+# magus on this host owns the WORKLOAD layer only. Everything baked in the
+# substrate is out of scope and invisible to magus — it cannot touch the image,
+# the baked agents/quadlets, or its own reconcile loop.
+file_roots:
+  - /etc/containers/systemd   # quadlets — the per-host workload set
+  - /etc/core                 # fleet-managed, non-secret drop-ins
+  - /var/lib/magus
+
+# Which units magus may manage BY NAME — create a unit body, or add its
+# 10-magus.conf drop-in. Broad allowlist bounded by deny.units below, the same
+# shape as file_roots + deny.paths: allow wide, deny the substrate specifically.
+# Quadlet-generated services bypass this entirely (gated by deny.units only), so
+# this governs standalone units and drop-in parents. "*" = any unit except a
+# denied one; deny.units is the real guardrail.
+unit_patterns:
+  - "*"
+
+deny:
+  paths:
+    - /etc/shadow
+    - /etc/passwd
+    - /etc/sudoers
+    - /etc/sudoers.d/*
+    - /etc/core/reconcile.env   # install-injected fleet pointer — magus never manages it
+    - /etc/core/labmap.env      # labmap agent API key — magus never touches it
+  units:
+    - "sshd.*"
+    - "systemd-*"
+    - "magus-provision-*"       # substrate first-boot oneshots, not a workload
+    - "labmap-agent.*"          # baked discovery agent, not a workload
+    - "core-reconcile.*"        # the reconcile loop never manages itself
+    - "bootc-*"                 # OS update path is bootc's, not magus's

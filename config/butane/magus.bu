@@ -1,6 +1,10 @@
 variant: fcos
 version: "1.6.0"
 
+# Install-time identity + reconcile bootstrap. FCOS Ignition is destructive and
+# runs once; everything common is baked in the image, everything per-host
+# workload is converged later by core-reconcile from core-fleet.
+
 passwd:
   users:
     - name: chuck
@@ -20,3 +24,13 @@ storage:
       contents:
         inline: |
           %wheel ALL=(ALL) NOPASSWD: ALL
+
+    # Reconcile loop config — an internal pointer at the fleet repo, not a
+    # secret: core-fleet is anon-cloneable on the homelab. Injected per-host
+    # (not baked) only so the substrate image stays generic. If core-fleet ever
+    # goes auth-required, this becomes https://TOKEN@.../ and the file a secret.
+    - path: /etc/core/reconcile.env
+      mode: 0644
+      contents:
+        inline: |
+          CORE_FLEET_REPO=https://gitea.wabash.place/lab/core-fleet.git

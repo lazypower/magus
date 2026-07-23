@@ -1,0 +1,25 @@
+[Unit]
+Description=labmap host agent (discovery)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Baked binary — /usr/bin, not /var/usrlocal/bin (golden image, not overlay).
+ExecStart=/usr/bin/labmap serve
+Restart=on-failure
+RestartSec=5
+Environment=LABMAP_SERVE_LISTEN=:9999
+# Optional: a persisted agent API key, injected at install via Ignition so it
+# survives reboots instead of regenerating. Never baked into the image.
+EnvironmentFile=-/etc/core/labmap.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/etc
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
