@@ -45,7 +45,7 @@ jobs:
             type=sha,prefix=
             type=schedule,pattern={{date 'YYYYMMDD'}}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: containers/vllm
           file: containers/vllm/Containerfile
