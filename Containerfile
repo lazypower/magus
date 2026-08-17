@@ -6,7 +6,7 @@
 # only needs the source, so the path mismatch is irrelevant. Pin each to a
 # commit for reproducible images and bump deliberately. Static linux/amd64
 # binaries, stripped, no toolchain in the final image.
-FROM docker.io/library/golang:1.26.5 AS agents
+FROM docker.io/library/golang:1.26.6 AS agents
 
 ARG MAGUS_CLI_REPO=https://github.com/lazypower/magus-cli
 # renovate: datasource=github-commits depName=lazypower/magus-cli branch=main
