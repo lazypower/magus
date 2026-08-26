@@ -10,7 +10,7 @@ FROM docker.io/library/golang:1.26.6 AS agents
 
 ARG MAGUS_CLI_REPO=https://github.com/lazypower/magus-cli
 # renovate: datasource=github-commits depName=lazypower/magus-cli branch=main
-ARG MAGUS_CLI_REF=cb709a38bd2dfb6554769981a8ba2f6c02e25d33
+ARG MAGUS_CLI_REF=667c1e4d524775e4e8767e65abf132d1f46ba283
 RUN git clone "${MAGUS_CLI_REPO}" /src/magus \
     && git -C /src/magus checkout "${MAGUS_CLI_REF}" \
     && cd /src/magus \
