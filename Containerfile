@@ -89,6 +89,19 @@ RUN systemctl enable magus-provision-user.service magus-provision-data.service m
 COPY config/systemd/bootc-fetch-apply-updates.timer.d/schedule.conf \
      /usr/lib/systemd/system/bootc-fetch-apply-updates.timer.d/schedule.conf
 
+# Container tag refresh for quadlets labelled AutoUpdate=registry, daily at 2am
+# Central.
+COPY config/systemd/podman-auto-update.timer.d/schedule.conf \
+     /usr/lib/systemd/system/podman-auto-update.timer.d/schedule.conf
+
+# Both update paths ship disabled by preset, so configuring their timers is not
+# enough. Enable them explicitly or the drop-ins above tune a timer that never
+# runs. zincati is masked instead: it is the stock FCOS updater and cannot act
+# on a deployment sourced from a custom bootc registry image, so it only logs
+# "not found in the update graph" every few minutes while reporting active.
+RUN systemctl enable bootc-fetch-apply-updates.timer podman-auto-update.timer \
+ && systemctl mask zincati.service
+
 # Quadlet container service definitions
 COPY config/quadlets/ollama.container    /usr/share/containers/systemd/ollama.container
 COPY config/quadlets/vllm.container      /usr/share/containers/systemd/vllm.container
