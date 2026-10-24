@@ -21,6 +21,12 @@ Environment=OLLAMA_VULKAN=1
 # Keep models resident for 1h to avoid per-request load tax
 Environment=OLLAMA_KEEP_ALIVE=1h
 
+# Default context for requests that don't set num_ctx
+Environment=OLLAMA_CONTEXT_LENGTH=32768
+
+# Allow model weights to be locked in memory
+Ulimit=memlock=-1:-1
+
 # Model storage on secondary NVMe
 Volume=/var/data/ollama:/root/.ollama:Z
 

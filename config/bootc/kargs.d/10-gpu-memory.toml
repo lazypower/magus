@@ -1,0 +1,7 @@
+# Let the iGPU address up to 96 GiB of system RAM through GTT.
+# The kernel default caps TTM at half of RAM, which is too small for 100B+
+# models with long contexts. amdgpu sizes GTT from this limit.
+# 25165824 = 96 GiB / 4 KiB pages. Leave the BIOS UMA frame buffer at its
+# minimum so the remainder stays available to the host.
+kargs = ["ttm.pages_limit=25165824"]
+match-architectures = ["x86_64"]
