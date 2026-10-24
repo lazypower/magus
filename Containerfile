@@ -78,6 +78,7 @@ COPY config/profile.d/brew.sh          /etc/profile.d/brew.sh
 COPY config/profile.d/ollama.sh        /etc/profile.d/ollama.sh
 COPY config/udev/70-amdgpu.rules       /usr/lib/udev/rules.d/70-amdgpu.rules
 COPY config/modprobe.d/amdgpu.conf     /usr/lib/modprobe.d/amdgpu.conf
+COPY config/bootc/kargs.d/10-gpu-memory.toml /usr/lib/bootc/kargs.d/10-gpu-memory.toml
 
 # First-boot provisioning (oneshot services)
 COPY config/systemd/magus-provision-user.service /usr/lib/systemd/system/magus-provision-user.service

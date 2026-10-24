@@ -242,6 +242,6 @@ Override anything in the image layer by placing a file in the `/etc/` equivalent
 ## Strix Halo Notes
 
 - **gfx1151 is not officially supported by ROCm.** The `HSA_OVERRIDE_GFX_VERSION=11.5.1` workaround is baked in. If a ROCm workload misbehaves, try `11.5.0` by creating `/etc/environment.d/99-rocm-override.conf` — no rebuild needed.
-- **Unified memory is the killer feature.** The iGPU shares the full 128 GB RAM pool via GTT. No VRAM wall, no PCIe bottleneck. The memory bandwidth tradeoff vs discrete is real, but for inference batch sizes of 1 it doesn't matter much.
+- **Unified memory is the killer feature.** The iGPU addresses up to 96 GiB of RAM via GTT, set by the `ttm.pages_limit` kernel argument in `config/bootc/kargs.d/` (the kernel default is half of RAM). The BIOS UMA frame buffer stays at its minimum. No VRAM wall, no PCIe bottleneck. The memory bandwidth tradeoff vs discrete is real, but for inference batch sizes of 1 it doesn't matter much.
 - **vLLM on Strix Halo is a science experiment.** vLLM's ROCm backend targets MI-series datacenter GPUs. RDNA 3.5 is uncharted territory. The quadlet is there to make it easy to test — manage expectations accordingly.
 - **Ollama is a custom container build**, not the upstream image. Built with the Vulkan backend and coopmat shader patch so KHR_cooperative_matrix fires on RDNA 3.5 (~50% throughput improvement). Lives in `containers/ollama/`, pattern adapted from [CobaltRush](https://github.com/lazypower/CobaltRush). Update independently from the OS with `just ollama push-ollama`.
