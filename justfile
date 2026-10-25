@@ -4,7 +4,6 @@ registry    := "ghcr.io/lazypower"
 
 # Image references
 os_ref      := registry + "/" + image_name + ":" + image_tag
-ollama_ref  := registry + "/" + image_name + "-ollama:" + image_tag
 llama_ref   := registry + "/" + image_name + "-llama-cpp:" + image_tag
 vllm_ref    := registry + "/" + image_name + "-vllm:" + image_tag
 
@@ -19,14 +18,6 @@ build:
         .
 
 # --- Compute containers ---
-
-# Build the Ollama container (Vulkan + coopmat)
-ollama:
-    podman build \
-        --tag {{ image_name }}-ollama:{{ image_tag }} \
-        --tag {{ ollama_ref }} \
-        -f containers/ollama/Containerfile \
-        containers/ollama
 
 # Build the llama.cpp container (Vulkan). Use COOPMAT=ON on GPU-equipped hosts.
 llama-cpp coopmat="OFF":
@@ -46,17 +37,13 @@ vllm:
         containers/vllm
 
 # Build everything
-all: build ollama llama-cpp vllm
+all: build llama-cpp vllm
 
 # --- Push ---
 
 # Push OS image to registry
 push: build
     podman push {{ os_ref }}
-
-# Push Ollama container to registry
-push-ollama: ollama
-    podman push {{ ollama_ref }}
 
 # Push llama.cpp container to registry
 push-llama-cpp: llama-cpp
@@ -67,7 +54,7 @@ push-vllm: vllm
     podman push {{ vllm_ref }}
 
 # Push everything
-push-all: push push-ollama push-llama-cpp push-vllm
+push-all: push push-llama-cpp push-vllm
 
 # --- Utilities ---
 

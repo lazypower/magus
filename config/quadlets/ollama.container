@@ -4,7 +4,7 @@ After=network-online.target magus-provision-data.service
 Wants=network-online.target
 
 [Container]
-Image=ghcr.io/lazypower/magus-ollama:latest
+Image=docker.io/ollama/ollama:0.40.11@sha256:dea72d1e22270fe095b68fdf756d2b489d615643c5a2eaebbc5f569181e322d8
 ContainerName=ollama
 
 # GPU device passthrough
@@ -15,8 +15,10 @@ AddDevice=/dev/dri:/dev/dri
 GroupAdd=video
 GroupAdd=render
 
-# Enable Vulkan GPU acceleration
+# Enable Vulkan GPU acceleration. Upstream skips integrated GPUs unless
+# OLLAMA_IGPU_ENABLE is set; the 8060S is one.
 Environment=OLLAMA_VULKAN=1
+Environment=OLLAMA_IGPU_ENABLE=1
 
 # Keep models resident for 1h to avoid per-request load tax
 Environment=OLLAMA_KEEP_ALIVE=1h

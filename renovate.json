@@ -19,7 +19,7 @@
       "automerge": false
     },
     {
-      "description": "ollama is 0.x: every minor can rework the build (v0.32 dropped the CPU/Vulkan CMake presets). Treat minor+major as breaking — build must pass and a human must merge.",
+      "description": "ollama is 0.x: a minor can change the model-store layout or GPU defaults (0.40 migrates manifests one-way and skips iGPUs unless OLLAMA_IGPU_ENABLE is set). A human merges after loading a model on the host.",
       "matchPackageNames": ["ollama/ollama"],
       "matchUpdateTypes": ["minor", "major"],
       "automerge": false

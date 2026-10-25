@@ -54,25 +54,20 @@ Two acceleration paths, both in the image:
 
 | Runtime | Runs as | GPU path | Port | Auto-start |
 |---------|---------|----------|------|------------|
-| **Ollama** | Custom container (quadlet) | Vulkan + coopmat | 11434 | Yes |
+| **Ollama** | Upstream container (quadlet) | Vulkan | 11434 | Yes |
 | **llama.cpp** | ramalama + custom image | Vulkan + coopmat | on-demand | No |
 | **vLLM** | Custom container (quadlet) | ROCm | 8000 | No (science experiment) |
 
 ### Ollama
 
-Custom-built container with Vulkan backend and coopmat shader patch (same pattern as [CobaltRush](https://github.com/lazypower/CobaltRush)). Ollama's vendored ggml is missing the coopmat feature-test shaders — we patch them from upstream llama.cpp so KHR_cooperative_matrix detection fires on RDNA 3.5. Starts at boot via quadlet:
+The upstream `ollama/ollama` image, pinned by digest in `config/quadlets/ollama.container`. Its amd64 build ships a Vulkan `llama-server` built from a pinned llama.cpp, plus the Mesa RADV driver, so cooperative-matrix support comes with it. `OLLAMA_IGPU_ENABLE=1` is required: upstream skips integrated GPUs by default. Starts at boot via quadlet:
 
 ```bash
 ollama run llama3.3:70b        # pull and run
 ollama list                    # see what's loaded
 ```
 
-Build the container separately from the OS image:
-
-```bash
-just ollama                    # build
-just push-ollama               # push to registry
-```
+Upgrade by changing the pinned tag and digest in the quadlet. The model store at `/var/data/ollama` is migrated in place by newer releases (0.40 moved manifests to `manifests-v2`), so snapshot `/var/data/ollama/models/manifests` before a minor bump if you may need to roll back.
 
 ### llama.cpp
 
@@ -152,12 +147,10 @@ just ignition
 | Target | Description |
 |--------|-------------|
 | `build` | Build the bootc OS image |
-| `ollama` | Build the Ollama container (Vulkan + coopmat) |
 | `llama-cpp` | Build the llama.cpp container (Vulkan + coopmat) |
 | `vllm` | Build the vLLM container (ROCm) |
 | `all` | Build everything |
 | `push` | Push OS image to registry |
-| `push-ollama` | Push Ollama container to registry |
 | `push-llama-cpp` | Push llama.cpp container to registry |
 | `push-vllm` | Push vLLM container to registry |
 | `push-all` | Push everything |
@@ -210,7 +203,6 @@ Containerfile                          # OS substrate image
 Makefile                               # Build automation (all targets)
 Brewfile                               # Userspace packages
 containers/
-  ollama/Containerfile                 # Custom Ollama (Vulkan + coopmat)
   llama-cpp/Containerfile              # Custom llama.cpp (Vulkan + coopmat)
   vllm/Containerfile                   # Custom vLLM (ROCm + Strix overrides)
 config/
@@ -220,7 +212,7 @@ config/
   profile.d/brew.sh                    # Linuxbrew PATH for login shells
   udev/70-amdgpu.rules                # GPU device permissions
   modprobe.d/amdgpu.conf              # amdgpu kernel module options
-  quadlets/ollama.container            # Ollama quadlet (points to custom image)
+  quadlets/ollama.container            # Ollama quadlet (upstream image, pinned by digest)
   quadlets/vllm.container              # vLLM quadlet (points to custom image)
 ```
 
@@ -244,4 +236,4 @@ Override anything in the image layer by placing a file in the `/etc/` equivalent
 - **gfx1151 is not officially supported by ROCm.** The `HSA_OVERRIDE_GFX_VERSION=11.5.1` workaround is baked in. If a ROCm workload misbehaves, try `11.5.0` by creating `/etc/environment.d/99-rocm-override.conf` — no rebuild needed.
 - **Unified memory is the killer feature.** The iGPU addresses up to 96 GiB of RAM via GTT, set by the `ttm.pages_limit` kernel argument in `config/bootc/kargs.d/` (the kernel default is half of RAM). The BIOS UMA frame buffer stays at its minimum. No VRAM wall, no PCIe bottleneck. The memory bandwidth tradeoff vs discrete is real, but for inference batch sizes of 1 it doesn't matter much.
 - **vLLM on Strix Halo is a science experiment.** vLLM's ROCm backend targets MI-series datacenter GPUs. RDNA 3.5 is uncharted territory. The quadlet is there to make it easy to test — manage expectations accordingly.
-- **Ollama is a custom container build**, not the upstream image. Built with the Vulkan backend and coopmat shader patch so KHR_cooperative_matrix fires on RDNA 3.5 (~50% throughput improvement). Lives in `containers/ollama/`, pattern adapted from [CobaltRush](https://github.com/lazypower/CobaltRush). Update independently from the OS with `just ollama push-ollama`.
+- **Ollama runs the upstream image** over Vulkan. It needs `OLLAMA_IGPU_ENABLE=1`, or it ignores the integrated GPU and runs on CPU. Update independently from the OS by bumping the pinned digest in the quadlet.
